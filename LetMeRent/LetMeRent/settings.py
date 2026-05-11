@@ -85,3 +85,21 @@ DOWNLOAD_DELAY = 1
 
 # Set settings whose default value is deprecated to a future-proof value
 FEED_EXPORT_ENCODING = "utf-8"
+
+
+ROBOTSTXT_OBEY = False
+
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
+
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+
+PLAYWRIGHT_BROWSER_TYPE = "chromium"
+
+PLAYWRIGHT_LAUNCH_OPTIONS = {
+    "headless": True,
+}
+
+DOWNLOAD_TIMEOUT = 60
