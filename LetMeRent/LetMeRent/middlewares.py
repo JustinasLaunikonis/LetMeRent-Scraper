@@ -13,6 +13,8 @@ from itemadapter import ItemAdapter
 
 class CloudflareBypassMiddleware:
     def process_request(self, request, spider):
+        if request.meta.get("playwright"):
+            return None
         response = cffi_requests.get(
             request.url,
             impersonate="chrome124",
