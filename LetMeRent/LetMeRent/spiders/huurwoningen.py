@@ -51,6 +51,10 @@ class HuurwoningenSpider(scrapy.Spider):
                     },
                 )
 
+        next_page = response.css(".pagination__item--next a::attr(href)").get()
+        if next_page:
+            yield response.follow(next_page, callback=self.parse)
+
     def parse_detail(self, response, **kwargs):
         description_parts = response.css(".listing-detail-description__truncated::text").getall()
         description = " ".join(t.strip() for t in description_parts if t.strip())
