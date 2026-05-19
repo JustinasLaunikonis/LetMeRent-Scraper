@@ -1,4 +1,5 @@
 import scrapy
+import re
 
 
 class IRentalizeSpider(scrapy.Spider):
@@ -211,24 +212,35 @@ class IRentalizeSpider(scrapy.Spider):
 
         return None
 
+    def clean_price(self, value):
+        if not value:
+            return None
+
+        number = re.sub(r"[^\d]", "", value)
+
+        return number if number else None
+
     def extract_starting_price(self, text):
         if "Starting from:" in text:
-            return text.split("Starting from:", 1)[1].split("Includes:", 1)[0].strip()
+            price = text.split("Starting from:", 1)[1].split("Includes:", 1)[0].strip()
+            return self.clean_price(price)
         return None
 
     def extract_base_rent(self, text):
         if "Base rent:" in text:
-            return text.split("Base rent:", 1)[1].split()[0].strip()
+            price = text.split("Base rent:", 1)[1].split()[0].strip()
+            return self.clean_price(price)
         return None
 
     def extract_service_fee(self, text):
         if "Includes:" in text and "service fee" in text:
             part = text.split("Includes:", 1)[1].split("service fee", 1)[0]
-            return part.strip()
+            return self.clean_price(part)
         return None
 
     def extract_utilities(self, text):
         if "utilities" in text:
             part = text.split("utilities", 1)[0]
-            return part.split()[-1].strip()
+            value = part.split()[-1].strip()
+            return self.clean_price(value)
         return None
