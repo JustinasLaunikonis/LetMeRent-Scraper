@@ -20,13 +20,17 @@ Run one spider for a specific city:
 docker run --rm letmerent-scraper crawl housinganywhere -a city=Amsterdam--Netherlands
 ```
 
-Run all spiders and save scraped data in Docker MongoDB:
+Run all spiders and save scraped data in MongoDB on the external Docker network `mongodb_dev_net`:
 
 ```sh
 docker compose up --build scraper
 ```
 
-MongoDB data is persisted in the Docker volume `letmerent-scraper_mongo-data`.
+By default, the scraper connects to `mongodb://mongodb:27017`. If your MongoDB container has a different service name or network alias, override it:
+
+```sh
+MONGODB_URI=mongodb://mongo:27017 docker compose up --build scraper
+```
 
 Run only selected spiders:
 
@@ -54,7 +58,7 @@ MONGODB_COLLECTION=listings
 MONGODB_UNIQUE_KEY=url
 ```
 
-For Docker Compose, the scraper uses `mongodb://mongo:27017` automatically.
+For Docker Compose, the scraper joins the external Docker network `mongodb_dev_net` and uses `mongodb://mongodb:27017` by default.
 
 `MONGODB_UNIQUE_KEY` defaults to `url`, so repeated scraper runs update the same listing document instead of inserting duplicates.
 
