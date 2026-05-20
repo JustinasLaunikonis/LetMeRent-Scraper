@@ -1,12 +1,8 @@
 services:
   scraper:
     build: .
-    environment:
-      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017}
-      MONGODB_DATABASE: letmerent
-      MONGODB_COLLECTION: listings
-      MONGODB_UNIQUE_KEY: url
-      SPIDERS: ${SPIDERS:-funda housinganywhere huurwoningen irentalize kamernet}
+    env_file:
+      - LetMeRent/.env
     entrypoint: ["/app/scripts/run_all_spiders.sh"]
     command: []
     networks:
