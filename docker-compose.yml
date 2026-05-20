@@ -1,0 +1,31 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  scraper:
+    build: .
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: letmerent
+      MONGODB_COLLECTION: listings
+      MONGODB_UNIQUE_KEY: url
+      SPIDERS: ${SPIDERS:-funda housinganywhere huurwoningen irentalize kamernet}
+    entrypoint: ["/app/scripts/run_all_spiders.sh"]
+    command: []
+
+volumes:
+  mongo-data:

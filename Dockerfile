@@ -9,6 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY LetMeRent ./LetMeRent
+COPY scripts ./scripts
+RUN chmod +x /app/scripts/run_all_spiders.sh
 
 WORKDIR /app/LetMeRent
 
