@@ -4,9 +4,27 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
 from scrapy import signals
+from scrapy.http import HtmlResponse
+from curl_cffi import requests as cffi_requests
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
+
+
+class CloudflareBypassMiddleware:
+    def process_request(self, request, spider):
+        if request.meta.get("playwright"):
+            return None
+        response = cffi_requests.get(
+            request.url,
+            impersonate="chrome124",
+        )
+        return HtmlResponse(
+            url=request.url,
+            status=response.status_code,
+            body=response.content,
+            encoding="utf-8",
+        )
 
 
 class LetmerentSpiderMiddleware:
