@@ -26,17 +26,7 @@ Run all spiders and save scraped data in MongoDB on the external Docker network 
 docker compose up --build scraper
 ```
 
-By default, the scraper connects to `mongodb://mongodb:27017`. If your MongoDB container has a different service name or network alias, override it:
-
-```sh
-MONGODB_URI=mongodb://mongo:27017 docker compose up --build scraper
-```
-
-Run only selected spiders:
-
-```sh
-SPIDERS="housinganywhere kamernet" docker compose up --build scraper
-```
+Docker Compose reads runtime settings from `LetMeRent/.env`. To use a different MongoDB service name or run only selected spiders, edit `MONGODB_URI` or `SPIDERS` there.
 
 Write JSON results to a file on the host instead of MongoDB:
 
@@ -56,9 +46,10 @@ MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=letmerent
 MONGODB_COLLECTION=listings
 MONGODB_UNIQUE_KEY=url
+SPIDERS=funda housinganywhere huurwoningen irentalize kamernet
 ```
 
-For Docker Compose, the scraper joins the external Docker network `mongodb_dev_net` and uses `mongodb://mongodb:27017` by default.
+For Docker Compose, the scraper joins the external Docker network `mongodb_dev_net`. Use a network-reachable MongoDB hostname in `MONGODB_URI`, for example `mongodb://mongodb:27017`.
 
 `MONGODB_UNIQUE_KEY` defaults to `url`, so repeated scraper runs update the same listing document instead of inserting duplicates.
 
