@@ -24,19 +24,19 @@ class KamernetSpider(scrapy.Spider):
             details = card.css(".SearchResultCard_contentRow__VZIJY + .SearchResultCard_contentRow__VZIJY p::text").getall()
             size_raw = details[0].strip() if len(details) > 0 else ""
             size_match = re.search(r"\d+", size_raw)
-            size = size_match.group() if size_match else ""
-            furnishing = details[1].strip() if len(details) > 1 else ""
+            living_area = size_match.group() if size_match else ""
+            furnished = details[1].strip() if len(details) > 1 else ""
             property_type = details[2].strip() if len(details) > 2 else ""
 
             available_from_raw = card.css(".SearchResultCard_contentRow__VZIJY p::text").getall()
-            available_from = next((t.strip().removeprefix("From").strip() for t in available_from_raw if "From" in t), "")
+            availability = next((t.strip().removeprefix("From").strip() for t in available_from_raw if "From" in t), "")
 
             raw_price = card.css("span.MuiTypography-h5::text").get("").strip()
             price_match = re.search(r"\d+", raw_price.replace(".", "").replace(",", ""))
             price = price_match.group() if price_match else ""
 
             price_type = card.css(".SearchResultCard_contentRow__VZIJY p.MuiTypography-body2::text").getall()
-            price_suffix = next((t.strip() for t in price_type if "month" in t or "week" in t), "")
+            price_label = next((t.strip() for t in price_type if "month" in t or "week" in t), "")
 
             if url:
                 yield scrapy.Request(
@@ -44,15 +44,17 @@ class KamernetSpider(scrapy.Spider):
                     callback=self.parse_detail,
                     cb_kwargs={
                         "url": url,
-                        "image": image,
+                        "title": street,
+                        "images": [image] if image else [],
+                        "address": street,
                         "street": street,
                         "city": city,
-                        "size": size,
-                        "furnishing": furnishing,
+                        "living_area": living_area,
+                        "furnished": furnished,
                         "property_type": property_type,
-                        "available_from": available_from,
+                        "availability": availability,
                         "price": price,
-                        "price_suffix": price_suffix,
+                        "price_label": price_label,
                     },
                 )
 

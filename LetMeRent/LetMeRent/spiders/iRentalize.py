@@ -154,6 +154,8 @@ class IRentalizeSpider(scrapy.Spider):
 
         landlord = response.css(".elementor-author-box__name::text").get()
         status = self.extract_status(headings, all_text)
+        starting_price = self.extract_starting_price(all_text)
+        base_rent = self.extract_base_rent(all_text)
 
         yield {
             "city_filter": response.meta.get("city_filter"),
@@ -162,15 +164,18 @@ class IRentalizeSpider(scrapy.Spider):
             "title": title.strip() if title else None,
             "property_type": self.extract_property_type(headings),
             "city": self.extract_city(headings, all_text),
-            "size": self.extract_size(all_text),
+            "living_area": self.extract_size(all_text),
             "rooms": self.extract_rooms(all_text),
+            "availability": status,
             "status": status,
-            "starting_price": self.extract_starting_price(all_text),
-            "base_rent": self.extract_base_rent(all_text),
+            "price": starting_price or base_rent,
+            "starting_price": starting_price,
+            "base_rent": base_rent,
             "service_fee": self.extract_service_fee(all_text),
             "utilities": self.extract_utilities(all_text),
             "images": images,
             "description": all_text,
+            "landlord_name": landlord.strip() if landlord else None,
         }
 
     def extract_property_type(self, headings):

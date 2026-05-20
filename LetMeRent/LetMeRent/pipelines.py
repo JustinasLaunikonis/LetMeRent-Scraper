@@ -13,6 +13,18 @@ from pymongo.errors import PyMongoError
 from scrapy.exceptions import NotConfigured
 
 
+DEPRECATED_FIELDS = (
+    "available_from",
+    "furnishing",
+    "home_type",
+    "image",
+    "lat",
+    "lng",
+    "price_suffix",
+    "size",
+)
+
+
 class LetmerentPipeline:
     def process_item(self, item, spider):
         return item
@@ -80,6 +92,7 @@ class MongoDBPipeline:
                     {
                         "$set": document,
                         "$setOnInsert": {"created_at": now},
+                        "$unset": {field: "" for field in DEPRECATED_FIELDS},
                     },
                     upsert=True,
                 )

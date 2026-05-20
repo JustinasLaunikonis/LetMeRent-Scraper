@@ -9,6 +9,7 @@ class HousinganywhereSpider(scrapy.Spider):
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.city = city or "Emmen--Netherlands"
+        self.city_name = self.city.split("--", 1)[0].replace("-", " ")
 
     def start_requests(self):
         url = f"https://housinganywhere.com/s/{self.city}"
@@ -33,9 +34,10 @@ class HousinganywhereSpider(scrapy.Spider):
 
             yield {
                 "title": title,
+                "city": self.city_name,
                 "price": price,
                 "price_label": price_label,
-                "size": size,
+                "living_area": size,
                 "housemates": housemates,
                 "availability": availability,
                 "url": response.urljoin(href),
