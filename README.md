@@ -82,6 +82,16 @@ Start the API from the repository root:
 python3 app.py
 ```
 
+The API entrypoint stays in `app.py`. The implementation lives in `api/`:
+
+```text
+api/routes.py         HTTP endpoints and request validation
+api/spider_jobs.py    background Scrapy job runner and Docker log streaming
+api/mongo.py          MongoDB listing reads
+api/serialization.py  MongoDB values converted for JSON responses
+api/config.py         shared Scrapy and Mongo settings
+```
+
 Run the configured spiders in the background:
 
 ```sh
