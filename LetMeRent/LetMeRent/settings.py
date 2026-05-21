@@ -7,6 +7,28 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import os
+from pathlib import Path
+
+
+def load_env_file(path):
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        os.environ.setdefault(key, value)
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+load_env_file(BASE_DIR / ".env")
+
 BOT_NAME = "LetMeRent"
 
 SPIDER_MODULES = ["LetMeRent.spiders"]
@@ -58,9 +80,14 @@ DOWNLOADER_MIDDLEWARES = {
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "LetMeRent.pipelines.LetmerentPipeline": 300,
-#}
+ITEM_PIPELINES = {
+    "LetMeRent.pipelines.MongoDBPipeline": 300,
+}
+
+MONGODB_URI = os.getenv("MONGODB_URI")
+MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "letmerent")
+MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "listings")
+MONGODB_UNIQUE_KEY = os.getenv("MONGODB_UNIQUE_KEY", "url")
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

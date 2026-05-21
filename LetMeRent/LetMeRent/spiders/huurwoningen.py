@@ -44,9 +44,9 @@ class HuurwoningenSpider(scrapy.Spider):
                         "title": title,
                         "address": address,
                         "price": price,
-                        "size": size,
+                        "living_area": size,
                         "rooms": rooms,
-                        "image": image,
+                        "images": [image] if image else [],
                         "url": response.urljoin(href),
                     },
                 )
@@ -59,7 +59,7 @@ class HuurwoningenSpider(scrapy.Spider):
         description_parts = response.css(".listing-detail-description__truncated::text").getall()
         description = " ".join(t.strip() for t in description_parts if t.strip())
 
-        images = response.css(".carrousel__item .picture__image::attr(src)").getall()
+        images = list(dict.fromkeys(kwargs.pop("images", []) + response.css(".carrousel__item .picture__image::attr(src)").getall()))
 
         interior = response.css("[aria-describedby='tooltip-listing-features-interior']::text").get("").strip()
         energy_label = response.css("[class*='listing-features__description--energy-label'] .listing-features__main-description::text").get("").strip()
@@ -74,7 +74,7 @@ class HuurwoningenSpider(scrapy.Spider):
             "description": description,
             "images": images,
             "energy_label": energy_label,
-            "home_type": home_type,
+            "property_type": home_type,
             "construction_year": construction_year,
             "floor": floor,
         }
