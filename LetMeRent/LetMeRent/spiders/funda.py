@@ -90,6 +90,7 @@ class FundaSpider(scrapy.Spider):
 
         street = addr.get("addressTitle") or response.css("h1[data-global-id] span.block::text").get("").strip()
         postal_city = addr.get("addressSubtitle") or response.css("h1[data-global-id] .text-neutral-40::text").get("").strip()
+        city = re.sub(r"^\d{4}\s?[A-Z]{2}\s*", "", postal_city).strip() or None
         neighbourhood = (addr.get("neighborhood") or {}).get("name") or response.css("h1[data-global-id] a::text").get("").strip()
 
         features = {}
@@ -112,14 +113,18 @@ class FundaSpider(scrapy.Spider):
 
         yield {
             "url": response.url,
+            "title": street,
+            "address": street,
+            "city": city,
             "street": street,
             "postal_city": postal_city,
             "neighbourhood": neighbourhood,
-            "lat": lat,
-            "lng": lng,
+            "latitude": lat,
+            "longitude": lng,
             "price": price,
             "living_area": living_area,
             "plot_size": plot_size,
+            "rooms": bedrooms,
             "bedrooms": bedrooms,
             "energy_label": energy_label,
             "description": description,
@@ -127,6 +132,6 @@ class FundaSpider(scrapy.Spider):
             "agent": agent,
             "agent_url": agent_url,
             "phone": phone,
-            "image": image,
+            "images": [image] if image else [],
             "features": features,
         }
