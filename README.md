@@ -2,28 +2,30 @@
 
 ## Docker
 
-Build the scraper image:
+Build the API image:
 
 ```sh
 docker build -t letmerent-scraper .
 ```
 
-Run the default spider:
+Run the Flask API:
 
 ```sh
-docker run --rm letmerent-scraper
+docker run --rm -p 5000:5000 --env-file LetMeRent/.env letmerent-scraper
 ```
 
-Run one spider for a specific city:
+Run with Docker Compose:
 
 ```sh
-docker run --rm letmerent-scraper crawl housinganywhere -a city=Amsterdam--Netherlands
+docker compose up --build api
 ```
 
-Run all spiders and save scraped data in MongoDB on the external Docker network `mongodb_dev_net`:
+Then start spiders through the API:
 
 ```sh
-docker compose up --build scraper
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam"}'
 ```
 
 Docker Compose reads runtime settings from `LetMeRent/.env`. To use a different MongoDB service name or run only selected spiders, edit `MONGODB_URI` or `SPIDERS` there.
@@ -32,7 +34,9 @@ Write JSON results to a file on the host instead of MongoDB:
 
 ```sh
 mkdir -p output
-docker run --rm -v "$PWD/output:/output" letmerent-scraper crawl housinganywhere -a city=Amsterdam--Netherlands -O /output/listings.json
+docker run --rm -w /app/LetMeRent --entrypoint scrapy \
+  -v "$PWD/output:/output" letmerent-scraper \
+  crawl housinganywhere -a city=Amsterdam -O /output/listings.json
 ```
 
 ## MongoDB Storage
@@ -67,5 +71,58 @@ Run a spider from the Scrapy project directory:
 
 ```sh
 cd LetMeRent
-scrapy crawl huurwoningen
+scrapy crawl huurwoningen -a city=Amsterdam
+```
+
+## Flask API
+
+Start the API from the repository root:
+
+```sh
+python3 app.py
+```
+
+The API entrypoint stays in `app.py`. The implementation lives in `api/`:
+
+```text
+api/routes.py         HTTP endpoints and request validation
+api/spider_jobs.py    background Scrapy job runner and Docker log streaming
+api/mongo.py          MongoDB listing reads
+api/serialization.py  MongoDB values converted for JSON responses
+api/config.py         shared Scrapy and Mongo settings
+```
+
+Run the configured spiders in the background:
+
+```sh
+curl -X POST http://localhost:5000/spiders/run
+```
+
+Run the configured spiders for one city:
+
+```sh
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam"}'
+```
+
+The response contains a `job.id`. Docker logs include `spider_job_*` lines for
+job status, and Scrapy logs are streamed directly to the container output.
+
+```sh
+docker compose logs -f api
+```
+
+Run selected spiders:
+
+```sh
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Content-Type: application/json" \
+  -d '{"spiders":["housinganywhere","kamernet"]}'
+```
+
+Fetch all MongoDB listings:
+
+```sh
+curl http://localhost:5000/data
 ```
