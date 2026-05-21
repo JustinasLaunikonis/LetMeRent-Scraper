@@ -105,6 +105,7 @@ def run_spiders():
     payload = request.get_json(silent=True) or {}
     spiders = payload.get("spiders") or _configured_spiders()
     extra_args = payload.get("args") or []
+    city = payload.get("city")
 
     if isinstance(spiders, str):
         spiders = spiders.split()
@@ -114,6 +115,11 @@ def run_spiders():
 
     if not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args):
         return jsonify({"error": "args must be a list of strings"}), 400
+
+    if city is not None:
+        if not isinstance(city, str) or not city.strip():
+            return jsonify({"error": "city must be a non-empty string"}), 400
+        extra_args = [*extra_args, "-a", f"city={city.strip()}"]
 
     job_id = str(uuid.uuid4())
 

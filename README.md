@@ -23,7 +23,9 @@ docker compose up --build api
 Then start spiders through the API:
 
 ```sh
-curl -X POST http://localhost:5000/spiders/run
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam"}'
 ```
 
 Docker Compose reads runtime settings from `LetMeRent/.env`. To use a different MongoDB service name or run only selected spiders, edit `MONGODB_URI` or `SPIDERS` there.
@@ -32,7 +34,9 @@ Write JSON results to a file on the host instead of MongoDB:
 
 ```sh
 mkdir -p output
-docker run --rm -v "$PWD/output:/output" letmerent-scraper crawl housinganywhere -a city=Amsterdam--Netherlands -O /output/listings.json
+docker run --rm -w /app/LetMeRent --entrypoint scrapy \
+  -v "$PWD/output:/output" letmerent-scraper \
+  crawl housinganywhere -a city=Amsterdam -O /output/listings.json
 ```
 
 ## MongoDB Storage
@@ -67,7 +71,7 @@ Run a spider from the Scrapy project directory:
 
 ```sh
 cd LetMeRent
-scrapy crawl huurwoningen
+scrapy crawl huurwoningen -a city=Amsterdam
 ```
 
 ## Flask API
@@ -82,6 +86,14 @@ Run the configured spiders in the background:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run
+```
+
+Run the configured spiders for one city:
+
+```sh
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam"}'
 ```
 
 Run selected spiders:

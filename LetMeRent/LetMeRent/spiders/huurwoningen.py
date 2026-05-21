@@ -1,6 +1,8 @@
 import re
 import scrapy
 
+from LetMeRent.spiders.city_utils import clean_city, city_slug
+
 
 class HuurwoningenSpider(scrapy.Spider):
     name = "huurwoningen"
@@ -8,9 +10,8 @@ class HuurwoningenSpider(scrapy.Spider):
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        raw_city = city or "emmen"
-        self.city_name = raw_city.lower()
-        self.city = self.city_name.replace(" ", "-")
+        self.city_name = clean_city(city).lower()
+        self.city = city_slug(city)
 
     async def start(self):
         url = f"https://www.huurwoningen.nl/en/in/{self.city}"
