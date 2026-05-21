@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,13 @@ from LetMeRent.settings import (  # noqa: E402
 DEFAULT_SPIDERS = ("funda", "housinganywhere", "huurwoningen", "irentalize", "kamernet")
 
 app = Flask(__name__)
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
+app.logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
 
 _job_lock = threading.Lock()
 _current_job: dict[str, Any] | None = None
@@ -65,40 +71,76 @@ def _mongo_collection():
     return client, client[MONGODB_DATABASE][MONGODB_COLLECTION]
 
 
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _log_process_stream(stream, level: int, job_id: str, spider: str, stream_name: str) -> None:
+    for line in iter(stream.readline, ""):
+        line = line.rstrip()
+        if line:
+            app.logger.log(
+                level,
+                "spider_output job_id=%s spider=%s stream=%s %s",
+                job_id,
+                spider,
+                stream_name,
+                line,
+            )
+    stream.close()
+
+
 def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> None:
     results = []
     app.logger.info("spider_job_started job_id=%s spiders=%s args=%s", job_id, ",".join(spiders), extra_args)
 
     for spider in spiders:
         app.logger.info("spider_job_spider_started job_id=%s spider=%s", job_id, spider)
-        spider_started_at = datetime.utcnow().isoformat() + "Z"
+        spider_started_at = _utc_now()
         command = [sys.executable, "-m", "scrapy", "crawl", spider, *extra_args]
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=SCRAPY_PROJECT_DIR,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
+        stdout_thread = threading.Thread(
+            target=_log_process_stream,
+            args=(process.stdout, logging.INFO, job_id, spider, "stdout"),
+        )
+        stderr_thread = threading.Thread(
+            target=_log_process_stream,
+            args=(process.stderr, logging.ERROR, job_id, spider, "stderr"),
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        returncode = process.wait()
+        stdout_thread.join()
+        stderr_thread.join()
+
         results.append(
             {
                 "spider": spider,
-                "status": "completed" if completed.returncode == 0 else "failed",
-                "returncode": completed.returncode,
+                "status": "completed" if returncode == 0 else "failed",
+                "returncode": returncode,
                 "started_at": spider_started_at,
-                "finished_at": datetime.utcnow().isoformat() + "Z",
+                "finished_at": _utc_now(),
             }
         )
 
-        if completed.returncode == 0:
+        if returncode == 0:
             app.logger.info("spider_job_spider_completed job_id=%s spider=%s", job_id, spider)
         else:
             app.logger.error(
                 "spider_job_spider_failed job_id=%s spider=%s returncode=%s",
                 job_id,
                 spider,
-                completed.returncode,
+                returncode,
             )
 
-        if completed.returncode != 0:
+        if returncode != 0:
             break
 
     status = "completed" if all(result["returncode"] == 0 for result in results) else "failed"
@@ -111,7 +153,7 @@ def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> N
             "status": status,
             "spiders": spiders,
             "results": results,
-            "finished_at": datetime.utcnow().isoformat() + "Z",
+            "finished_at": _utc_now(),
         }
 
 
@@ -147,7 +189,7 @@ def run_spiders():
             "id": job_id,
             "status": "running",
             "spiders": spiders,
-            "started_at": datetime.utcnow().isoformat() + "Z",
+            "started_at": _utc_now(),
         }
 
     thread = threading.Thread(target=_run_spider_job, args=(job_id, spiders, extra_args), daemon=True)
