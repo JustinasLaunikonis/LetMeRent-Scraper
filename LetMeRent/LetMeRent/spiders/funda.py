@@ -2,6 +2,8 @@ import re
 import json
 import scrapy
 
+from LetMeRent.spiders.city_utils import city_slug
+
 
 LISTING_SELECTOR = '[data-testid="listingDetailsAddress"]'
 
@@ -12,7 +14,7 @@ class FundaSpider(scrapy.Spider):
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.city = city or "emmen"
+        self.city = city_slug(city)
 
     def start_requests(self):
         yield scrapy.Request(self._search_url(1), callback=self.parse, cb_kwargs={"page": 1})

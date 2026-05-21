@@ -1,6 +1,8 @@
 import scrapy
 import re
 
+from LetMeRent.spiders.city_utils import city_slug
+
 
 class KamernetSpider(scrapy.Spider):
     name = "kamernet"
@@ -8,7 +10,7 @@ class KamernetSpider(scrapy.Spider):
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.city = (city or "emmen").lower().replace(" ", "-")
+        self.city = city_slug(city)
         self.start_urls = [f"https://kamernet.nl/en/for-rent/properties-{self.city}"]
 
     def parse(self, response, page=1, **kwargs):
