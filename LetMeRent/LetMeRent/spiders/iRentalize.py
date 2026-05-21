@@ -1,26 +1,29 @@
 import scrapy
 import re
 
+from LetMeRent.spiders.city_utils import city_title
+
 
 class IRentalizeSpider(scrapy.Spider):
     name = "irentalize"
     allowed_domains = ["irentalize.nl"]
     start_urls = ["https://irentalize.nl/properties/"]
 
-    cities = ["Emmen", "Leeuwarden"]
+    def __init__(self, city=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.city = city_title(city)
 
     def start_requests(self):
-        for city in self.cities:
-            yield scrapy.Request(
-                url=self.start_urls[0],
-                meta={
-                    "playwright": True,
-                    "playwright_include_page": True,
-                    "city": city,
-                },
-                callback=self.parse_city,
-                dont_filter=True,
-            )
+        yield scrapy.Request(
+            url=self.start_urls[0],
+            meta={
+                "playwright": True,
+                "playwright_include_page": True,
+                "city": self.city,
+            },
+            callback=self.parse_city,
+            dont_filter=True,
+        )
 
     async def parse_city(self, response):
         page = response.meta["playwright_page"]

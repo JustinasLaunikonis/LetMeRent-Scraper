@@ -1,10 +1,10 @@
 services:
-  scraper:
+  api:
     build: .
     env_file:
       - LetMeRent/.env
-    entrypoint: ["/app/scripts/run_all_spiders.sh"]
-    command: []
+    ports:
+      - "5000:5000"
     networks:
       - mongodb_dev_net
 
