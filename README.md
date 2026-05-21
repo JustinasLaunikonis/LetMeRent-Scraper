@@ -96,6 +96,13 @@ curl -X POST http://localhost:5000/spiders/run \
   -d '{"city":"Amsterdam"}'
 ```
 
+The response contains a `job.id`. Docker logs include `spider_job_*` lines for
+job status, and Scrapy logs are streamed directly to the container output.
+
+```sh
+docker compose logs -f api
+```
+
 Run selected spiders:
 
 ```sh

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import subprocess
 import sys
 import threading
@@ -30,6 +31,7 @@ from LetMeRent.settings import (  # noqa: E402
 DEFAULT_SPIDERS = ("funda", "housinganywhere", "huurwoningen", "irentalize", "kamernet")
 
 app = Flask(__name__)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 _job_lock = threading.Lock()
 _current_job: dict[str, Any] | None = None
@@ -65,29 +67,42 @@ def _mongo_collection():
 
 def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> None:
     results = []
+    app.logger.info("spider_job_started job_id=%s spiders=%s args=%s", job_id, ",".join(spiders), extra_args)
 
     for spider in spiders:
+        app.logger.info("spider_job_spider_started job_id=%s spider=%s", job_id, spider)
+        spider_started_at = datetime.utcnow().isoformat() + "Z"
         command = [sys.executable, "-m", "scrapy", "crawl", spider, *extra_args]
         completed = subprocess.run(
             command,
             cwd=SCRAPY_PROJECT_DIR,
-            capture_output=True,
-            text=True,
             check=False,
         )
         results.append(
             {
                 "spider": spider,
+                "status": "completed" if completed.returncode == 0 else "failed",
                 "returncode": completed.returncode,
-                "stdout": completed.stdout[-4000:],
-                "stderr": completed.stderr[-4000:],
+                "started_at": spider_started_at,
+                "finished_at": datetime.utcnow().isoformat() + "Z",
             }
         )
+
+        if completed.returncode == 0:
+            app.logger.info("spider_job_spider_completed job_id=%s spider=%s", job_id, spider)
+        else:
+            app.logger.error(
+                "spider_job_spider_failed job_id=%s spider=%s returncode=%s",
+                job_id,
+                spider,
+                completed.returncode,
+            )
 
         if completed.returncode != 0:
             break
 
     status = "completed" if all(result["returncode"] == 0 for result in results) else "failed"
+    app.logger.info("spider_job_finished job_id=%s status=%s", job_id, status)
 
     with _job_lock:
         global _current_job
