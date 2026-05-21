@@ -47,6 +47,23 @@ def _configured_spiders() -> list[str]:
     return os.getenv("SPIDERS", " ".join(DEFAULT_SPIDERS)).split()
 
 
+def _request_payload() -> dict[str, Any]:
+    payload = request.get_json(silent=True)
+
+    if payload is None:
+        payload = request.get_json(force=True, silent=True)
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    for key in ("city", "spiders"):
+        value = request.values.get(key)
+        if value is not None:
+            payload[key] = value
+
+    return payload
+
+
 def _json_safe(value: Any) -> Any:
     if isinstance(value, ObjectId):
         return str(value)
@@ -75,29 +92,28 @@ def _utc_now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _docker_log(level: str, message: str) -> None:
+    print(f"{_utc_now()} {level} {message}", file=sys.stdout, flush=True)
+
+
 def _log_process_stream(stream, level: int, job_id: str, spider: str, stream_name: str) -> None:
     for line in iter(stream.readline, ""):
         line = line.rstrip()
         if line:
-            app.logger.log(
-                level,
-                "spider_output job_id=%s spider=%s stream=%s %s",
-                job_id,
-                spider,
-                stream_name,
-                line,
-            )
+            level_name = logging.getLevelName(level)
+            _docker_log(level_name, f"spider_output job_id={job_id} spider={spider} stream={stream_name} {line}")
     stream.close()
 
 
 def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> None:
     results = []
-    app.logger.info("spider_job_started job_id=%s spiders=%s args=%s", job_id, ",".join(spiders), extra_args)
+    _docker_log("INFO", f"spider_job_started job_id={job_id} spiders={','.join(spiders)} args={extra_args}")
 
     for spider in spiders:
-        app.logger.info("spider_job_spider_started job_id=%s spider=%s", job_id, spider)
+        _docker_log("INFO", f"spider_job_spider_started job_id={job_id} spider={spider}")
         spider_started_at = _utc_now()
         command = [sys.executable, "-m", "scrapy", "crawl", spider, *extra_args]
+        _docker_log("INFO", f"spider_job_command job_id={job_id} spider={spider} command={command}")
         process = subprocess.Popen(
             command,
             cwd=SCRAPY_PROJECT_DIR,
@@ -131,20 +147,15 @@ def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> N
         )
 
         if returncode == 0:
-            app.logger.info("spider_job_spider_completed job_id=%s spider=%s", job_id, spider)
+            _docker_log("INFO", f"spider_job_spider_completed job_id={job_id} spider={spider}")
         else:
-            app.logger.error(
-                "spider_job_spider_failed job_id=%s spider=%s returncode=%s",
-                job_id,
-                spider,
-                returncode,
-            )
+            _docker_log("ERROR", f"spider_job_spider_failed job_id={job_id} spider={spider} returncode={returncode}")
 
         if returncode != 0:
             break
 
     status = "completed" if all(result["returncode"] == 0 for result in results) else "failed"
-    app.logger.info("spider_job_finished job_id=%s status=%s", job_id, status)
+    _docker_log("INFO", f"spider_job_finished job_id={job_id} status={status}")
 
     with _job_lock:
         global _current_job
@@ -159,7 +170,7 @@ def _run_spider_job(job_id: str, spiders: list[str], extra_args: list[str]) -> N
 
 @app.post("/spiders/run")
 def run_spiders():
-    payload = request.get_json(silent=True) or {}
+    payload = _request_payload()
     spiders = payload.get("spiders") or _configured_spiders()
     extra_args = payload.get("args") or []
     city = payload.get("city")
@@ -176,7 +187,10 @@ def run_spiders():
     if city is not None:
         if not isinstance(city, str) or not city.strip():
             return jsonify({"error": "city must be a non-empty string"}), 400
-        extra_args = [*extra_args, "-a", f"city={city.strip()}"]
+        city = city.strip()
+        extra_args = [*extra_args, "-a", f"city={city}"]
+
+    _docker_log("INFO", f"spider_job_request spiders={spiders} city={city} extra_args={extra_args}")
 
     job_id = str(uuid.uuid4())
 
@@ -189,6 +203,8 @@ def run_spiders():
             "id": job_id,
             "status": "running",
             "spiders": spiders,
+            "city": city,
+            "args": extra_args,
             "started_at": _utc_now(),
         }
 
