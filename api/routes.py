@@ -59,9 +59,59 @@ def run_spiders():
 
 @api.get("/data")
 def get_data():
+    # This is the global filter that will be sent to the database.
+    # It starts empty so "return everything".
+    # We add conditions/tags to it based on what the user wants in the URL.
+    # Example: /data?city=emmen&max_price=1000&limit=50
+    mongo_filter = {}
+
+    # CITY FILTER
+    # If the URL is ?city=something, only return listings in that city.
+    city = request.args.get("city")
+    if city:
+        mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
+
+    # SOURCE FILTER
+    # If the URL contains ?source=kamernet, only return listings from that website.
+    source = request.args.get("source")
+    if source:
+        mongo_filter["source"] = source.strip().lower()
+
+    # PRICE FILTER
+    # If the URL contains ?min_price=500 and/or ?max_price=1200
+    # only return listings of that price range.
+    min_price = request.args.get("min_price", type=float)
+    max_price = request.args.get("max_price", type=float)
+    if min_price is not None or max_price is not None:
+        mongo_filter["price"] = {}
+        if min_price is not None:
+            mongo_filter["price"]["$gte"] = min_price  # $gte = "greater than or equal to"
+        if max_price is not None:
+            mongo_filter["price"]["$lte"] = max_price  # $lte = "less than or equal to"
+
+    # PAGINATION
+    # Instead of returning all 56mb's of listings at once, we return them in pages
+    # ?limit=50 = "show 50 listings"
+    # ?skip=50 = "skip first 50" (used to see/get page 2, 3, etc.)
+    # cap the limit at 500 so nobody can request zillions of data at once.
+    limit = request.args.get("limit", default=50, type=int)
+    skip = request.args.get("skip", default=0, type=int)
+    limit = max(1, min(limit, 500))
+
+    # FETCH FROM DATABASE
+    # If something goes wrong, return an error message.
     try:
-        documents = listings.all()
+        documents, total = listings.find(mongo_filter, limit=limit, skip=skip)
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
-    return jsonify({"count": len(documents), "data": json_safe(documents)})
+    # RETURN THE RESULT
+    # Send back a JSON with:
+    # - count: total number of listings that match the filter (in the whole database)
+    # - returned: how many listings are in this response
+    # - data: the actual listings
+    return jsonify({
+        "count": total,
+        "returned": len(documents),
+        "data": json_safe(documents)
+    })
