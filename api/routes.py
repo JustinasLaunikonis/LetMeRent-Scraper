@@ -95,7 +95,7 @@ def me():
 
 
 @api.post("/spiders/run")
-@jwt_required()
+#@jwt_required()
 def run_spiders():
     payload = _request_payload()
     spiders = payload.get("spiders") or configured_spiders()
