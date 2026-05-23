@@ -24,6 +24,7 @@ Then start spiders through the API:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"city":"Amsterdam"}'
 ```
@@ -49,8 +50,11 @@ Create `LetMeRent/.env` from `LetMeRent/.env.example` and set:
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=letmerent
 MONGODB_COLLECTION=listings
+MONGODB_USERS_COLLECTION=users
 MONGODB_UNIQUE_KEY=url
 SPIDERS=funda housinganywhere huurwoningen irentalize kamernet
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+JWT_ACCESS_TOKEN_EXPIRES_MINUTES=60
 ```
 
 For Docker Compose, the scraper joins the external Docker network `mongodb_dev_net`. Use a network-reachable MongoDB hostname in `MONGODB_URI`, for example `mongodb://mongodb:27017`.
@@ -86,22 +90,62 @@ The API entrypoint stays in `app.py`. The implementation lives in `api/`:
 
 ```text
 api/routes.py         HTTP endpoints and request validation
+api/auth.py           user registration, password hashing, JWT tokens, route guards
 api/spider_jobs.py    background Scrapy job runner and Docker log streaming
-api/mongo.py          MongoDB listing reads
+api/mongo.py          MongoDB listing reads and user storage
 api/serialization.py  MongoDB values converted for JSON responses
 api/config.py         shared Scrapy and Mongo settings
 ```
 
+### Auth
+
+The API stores users in the MongoDB `users` collection by default. A user document contains the basic scalable fields:
+
+```text
+email, username, password_hash, roles, is_active, created_at, updated_at, last_login_at
+```
+
+`password_hash` is never returned by API responses. Set a strong `JWT_SECRET_KEY` before registering or logging in users.
+
+Register a user:
+
+```sh
+curl -X POST http://localhost:5000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"change-this-password","username":"user"}'
+```
+
+Log in:
+
+```sh
+curl -X POST http://localhost:5000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"change-this-password"}'
+```
+
+Use the returned JWT on protected endpoints:
+
+```sh
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam"}'
+```
+
+Choose which routes require auth by adding `@jwt_required()` above the view in `api/routes.py`. For role-gated endpoints, use `@jwt_required(roles=("admin",))`.
+
 Run the configured spiders in the background:
 
 ```sh
-curl -X POST http://localhost:5000/spiders/run
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>"
 ```
 
 Run the configured spiders for one city:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"city":"Amsterdam"}'
 ```
@@ -117,6 +161,7 @@ Run selected spiders:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"spiders":["housinganywhere","kamernet"]}'
 ```
