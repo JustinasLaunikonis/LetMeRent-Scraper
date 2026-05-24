@@ -118,7 +118,7 @@ def get_data():
     })
 
 @api.get("/listings/old")
-def get_old_listings():
+def delete_old_listings():
     days = request.args.get("days", default=30, type=int)
 
     if days <= 0:
@@ -132,21 +132,29 @@ def get_old_listings():
         }
     }
 
-    limit = request.args.get("limit", default=50, type=int)
-    skip = request.args.get("skip", default=0, type=int)
-
-    limit = max(1, min(limit, 500))
-    skip = max(0, skip)
+    dry_run = request.args.get("dry_run", default="true").lower() == "true"
 
     try:
-        documents, total = listings.find(mongo_filter, limit=limit, skip=skip)
+        documents, total = listings.find(mongo_filter, limit=1, skip=0)
+
+        if dry_run:
+            return jsonify({
+                "dry_run": True,
+                "message": "No listings were deleted. This is only a preview.",
+                "older_than_days": days,
+                "cutoff_date": cutoff_date.isoformat(),
+                "would_delete": total
+            })
+
+        delete_result = listings.delete_many(mongo_filter)
+
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
     return jsonify({
+        "dry_run": False,
+        "message": "Old listings deleted successfully.",
         "older_than_days": days,
         "cutoff_date": cutoff_date.isoformat(),
-        "count": total,
-        "returned": len(documents),
-        "data": json_safe(documents)
+        "deleted": delete_result.deleted_count
     })

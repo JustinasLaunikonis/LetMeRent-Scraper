@@ -25,3 +25,13 @@ class ListingRepository:
             return list(cursor.skip(skip).limit(limit)), total
         finally:
             client.close()
+
+    def delete_many(self, query: dict):
+        if not MONGODB_URI:
+            raise RuntimeError("MONGODB_URI is not configured. Add it to LetMeRent/.env.")
+
+        client = MongoClient(MONGODB_URI)
+        try:
+            return client[MONGODB_DATABASE][MONGODB_COLLECTION].delete_many(query)
+        finally:
+            client.close()
