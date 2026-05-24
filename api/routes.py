@@ -5,6 +5,7 @@ from api.config import configured_spiders
 from api.mongo import ListingRepository
 from api.serialization import json_safe
 from api.spider_jobs import SpiderJobRunner
+from datetime import datetime, timedelta, timezone
 
 
 api = Blueprint("api", __name__)
@@ -111,6 +112,40 @@ def get_data():
     # - returned: how many listings are in this response
     # - data: the actual listings
     return jsonify({
+        "count": total,
+        "returned": len(documents),
+        "data": json_safe(documents)
+    })
+
+@api.get("/listings/old")
+def get_old_listings():
+    days = request.args.get("days", default=30, type=int)
+
+    if days <= 0:
+        return jsonify({"error": "days must be greater than 0"}), 400
+
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    mongo_filter = {
+        "created_at": {
+            "$lt": cutoff_date
+        }
+    }
+
+    limit = request.args.get("limit", default=50, type=int)
+    skip = request.args.get("skip", default=0, type=int)
+
+    limit = max(1, min(limit, 500))
+    skip = max(0, skip)
+
+    try:
+        documents, total = listings.find(mongo_filter, limit=limit, skip=skip)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "older_than_days": days,
+        "cutoff_date": cutoff_date.isoformat(),
         "count": total,
         "returned": len(documents),
         "data": json_safe(documents)
