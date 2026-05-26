@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    env_file:
+      - LetMeRent/.env
+    ports:
+      - "5000:5000"
+    networks:
+      - mongodb_dev_net
+
+networks:
+  mongodb_dev_net:
+    external: true
