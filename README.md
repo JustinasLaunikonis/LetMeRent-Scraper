@@ -24,6 +24,7 @@ Then start spiders through the API:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"city":"Amsterdam"}'
 ```
@@ -49,8 +50,11 @@ Create `LetMeRent/.env` from `LetMeRent/.env.example` and set:
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=letmerent
 MONGODB_COLLECTION=listings
+MONGODB_USERS_COLLECTION=users
 MONGODB_UNIQUE_KEY=url
 SPIDERS=funda housinganywhere huurwoningen irentalize kamernet
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+JWT_ACCESS_TOKEN_EXPIRES_MINUTES=60
 ```
 
 For Docker Compose, the scraper joins the external Docker network `mongodb_dev_net`. Use a network-reachable MongoDB hostname in `MONGODB_URI`, for example `mongodb://mongodb:27017`.
@@ -86,22 +90,139 @@ The API entrypoint stays in `app.py`. The implementation lives in `api/`:
 
 ```text
 api/routes.py         HTTP endpoints and request validation
+api/auth.py           user registration, password hashing, JWT tokens, route guards
 api/spider_jobs.py    background Scrapy job runner and Docker log streaming
-api/mongo.py          MongoDB listing reads
+api/mongo.py          MongoDB listing reads and user storage
 api/serialization.py  MongoDB values converted for JSON responses
 api/config.py         shared Scrapy and Mongo settings
+```
+
+### Auth
+
+The API stores users in the MongoDB `users` collection by default. A user document contains the basic scalable fields:
+
+```text
+email, username, password_hash, roles, is_active, created_at, updated_at, last_login_at
+```
+
+`password_hash` is never returned by API responses. Set a strong `JWT_SECRET_KEY` before registering or logging in users.
+
+Auth is JWT-based:
+
+- `POST /auth/register` creates a user and returns an access token.
+- `POST /auth/login` verifies the email and password, updates `last_login_at`, and returns an access token.
+- `GET /auth/me` requires a valid token and returns the current user.
+- Tokens are signed with `JWT_SECRET_KEY` using `HS256`.
+- Token lifetime is controlled by `JWT_ACCESS_TOKEN_EXPIRES_MINUTES`.
+
+Register a user:
+
+```sh
+curl -X POST http://localhost:5000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"change-this-password","username":"user"}'
+```
+
+Log in:
+
+```sh
+curl -X POST http://localhost:5000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"change-this-password"}'
+```
+
+Both register and login return this shape:
+
+```json
+{
+  "access_token": "<jwt>",
+  "token_type": "Bearer",
+  "expires_at": "2026-05-23T12:00:00+00:00",
+  "user": {
+    "id": "...",
+    "email": "user@example.com",
+    "username": "user",
+    "roles": ["user"],
+    "is_active": true
+  }
+}
+```
+
+Use the returned JWT in the `Authorization` header on protected endpoints:
+
+```sh
+curl http://localhost:5000/auth/me \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### `jwt_required` wrapper
+
+Use the `@jwt_required()` wrapper from `api.auth` to protect Flask routes. Put it directly above the route function, below the Flask route decorator:
+
+```python
+@api.get("/auth/me")
+@jwt_required()
+def me():
+    return jsonify({"user": json_safe(public_user(g.current_user))})
+```
+
+The wrapper expects this request header:
+
+```text
+Authorization: Bearer <access_token>
+```
+
+`@jwt_required()` does the following before the route handler runs:
+
+- Reads the bearer token from the `Authorization` header.
+- Decodes and validates the JWT with `JWT_SECRET_KEY`.
+- Rejects expired or invalid tokens with `401`.
+- Loads the user from MongoDB using the JWT `sub` claim.
+- Rejects inactive or missing users with `401`.
+- Stores the loaded user on Flask's `g.current_user`.
+
+Inside a protected route, use `g.current_user` when you need the authenticated user:
+
+```python
+@api.post("/account/example")
+@jwt_required()
+def account_example():
+    user_id = str(g.current_user["_id"])
+    return jsonify({"user_id": user_id})
+```
+
+For role-gated endpoints, pass the required roles:
+
+```python
+@api.post("/admin/example")
+@jwt_required(roles=("admin",))
+def admin_example():
+    return jsonify({"ok": True})
+```
+
+If the authenticated user does not have every required role, the wrapper returns `403` with `{"error": "insufficient permissions"}`.
+
+Choose which routes require auth by adding `@jwt_required()` in `api/routes.py`. For example, `/auth/me` is currently protected. To require login before running spiders, add the wrapper back to `run_spiders`:
+
+```python
+@api.post("/spiders/run")
+@jwt_required()
+def run_spiders():
+    ...
 ```
 
 Run the configured spiders in the background:
 
 ```sh
-curl -X POST http://localhost:5000/spiders/run
+curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>"
 ```
 
 Run the configured spiders for one city:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"city":"Amsterdam"}'
 ```
@@ -117,6 +238,7 @@ Run selected spiders:
 
 ```sh
 curl -X POST http://localhost:5000/spiders/run \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"spiders":["housinganywhere","kamernet"]}'
 ```
