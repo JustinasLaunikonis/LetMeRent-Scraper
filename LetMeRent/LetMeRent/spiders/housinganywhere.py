@@ -1,5 +1,7 @@
 import scrapy
 
+from LetMeRent.spiders.city_utils import city_title, housinganywhere_city
+
 
 class HousinganywhereSpider(scrapy.Spider):
     name = "housinganywhere"
@@ -8,7 +10,8 @@ class HousinganywhereSpider(scrapy.Spider):
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.city = city or "Emmen--Netherlands"
+        self.city = housinganywhere_city(city)
+        self.city_name = city_title(city)
 
     def start_requests(self):
         url = f"https://housinganywhere.com/s/{self.city}"
@@ -33,9 +36,10 @@ class HousinganywhereSpider(scrapy.Spider):
 
             yield {
                 "title": title,
+                "city": self.city_name,
                 "price": price,
                 "price_label": price_label,
-                "size": size,
+                "living_area": size,
                 "housemates": housemates,
                 "availability": availability,
                 "url": response.urljoin(href),
