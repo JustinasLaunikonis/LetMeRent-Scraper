@@ -66,6 +66,10 @@ class MongoDBPipeline:
                 background=True,
             )
 
+        self.collection.create_index([("price", ASCENDING)], background=True)
+        self.collection.create_index([("source", ASCENDING), ("price", ASCENDING)], background=True)
+        self.collection.create_index([("city", ASCENDING), ("price", ASCENDING)], background=True)
+
         spider.logger.info(
             "MongoDB pipeline connected to %s.%s",
             self.database_name,
