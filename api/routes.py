@@ -5,7 +5,6 @@ from api.config import configured_spiders
 from api.mongo import ListingRepository
 from api.serialization import json_safe
 from api.spider_jobs import SpiderJobRunner
-from LetMeRent.normalization import normalized_text
 
 
 api = Blueprint("api", __name__)
@@ -70,13 +69,13 @@ def get_data():
     # If the URL is ?city=something, only return listings in that city.
     city = request.args.get("city")
     if city:
-        mongo_filter["city_key"] = normalized_text(city)
+        mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
 
     # SOURCE FILTER
     # If the URL contains ?source=kamernet, only return listings from that website.
     source = request.args.get("source")
     if source:
-        mongo_filter["source"] = normalized_text(source)
+        mongo_filter["source"] = source.strip().lower()
 
     # PRICE FILTER
     # If the URL contains ?min_price=500 and/or ?max_price=1200
@@ -84,11 +83,11 @@ def get_data():
     min_price = request.args.get("min_price", type=float)
     max_price = request.args.get("max_price", type=float)
     if min_price is not None or max_price is not None:
-        mongo_filter["price_value"] = {}
+        mongo_filter["price"] = {}
         if min_price is not None:
-            mongo_filter["price_value"]["$gte"] = min_price  # $gte = "greater than or equal to"
+            mongo_filter["price"]["$gte"] = min_price  # $gte = "greater than or equal to"
         if max_price is not None:
-            mongo_filter["price_value"]["$lte"] = max_price  # $lte = "less than or equal to"
+            mongo_filter["price"]["$lte"] = max_price  # $lte = "less than or equal to"
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
@@ -98,13 +97,11 @@ def get_data():
     limit = request.args.get("limit", default=50, type=int)
     skip = request.args.get("skip", default=0, type=int)
     limit = max(1, min(limit, 500))
-    skip = max(0, skip)
-    include_count = request.args.get("include_count", default="true").lower() != "false"
 
     # FETCH FROM DATABASE
     # If something goes wrong, return an error message.
     try:
-        documents, total = listings.find(mongo_filter, limit=limit, skip=skip, include_count=include_count)
+        documents, total = listings.find(mongo_filter, limit=limit, skip=skip)
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
