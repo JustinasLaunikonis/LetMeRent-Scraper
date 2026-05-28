@@ -12,6 +12,8 @@ from pymongo import ASCENDING, MongoClient
 from pymongo.errors import PyMongoError
 from scrapy.exceptions import NotConfigured
 
+from LetMeRent.normalization import normalized_text, price_value
+
 
 DEPRECATED_FIELDS = (
     "available_from",
@@ -66,6 +68,10 @@ class MongoDBPipeline:
                 background=True,
             )
 
+        self.collection.create_index([("price_value", ASCENDING)], background=True)
+        self.collection.create_index([("source", ASCENDING), ("price_value", ASCENDING)], background=True)
+        self.collection.create_index([("city_key", ASCENDING), ("price_value", ASCENDING)], background=True)
+
         spider.logger.info(
             "MongoDB pipeline connected to %s.%s",
             self.database_name,
@@ -82,6 +88,15 @@ class MongoDBPipeline:
 
         document.setdefault("source", spider.name)
         document["scraped_at"] = now
+        document["price_value"] = price_value(document.get("price"))
+
+        city_key = normalized_text(document.get("city"))
+        if city_key:
+            document["city_key"] = city_key
+
+        source_key = normalized_text(document.get("source"))
+        if source_key:
+            document["source"] = source_key
 
         try:
             unique_value = document.get(self.unique_key) if self.unique_key else None

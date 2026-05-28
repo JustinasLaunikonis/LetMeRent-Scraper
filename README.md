@@ -126,3 +126,19 @@ Fetch all MongoDB listings:
 ```sh
 curl http://localhost:5000/data
 ```
+
+Fetch listings by price with pagination:
+
+```sh
+curl "http://localhost:5000/data?min_price=800&max_price=1400&limit=50&skip=0"
+```
+
+For the fastest response when the UI does not need the total match count:
+
+```sh
+curl "http://localhost:5000/data?max_price=1200&include_count=false"
+```
+
+The API stores and queries a numeric `price_value` field and creates MongoDB
+indexes for `price_value`, `source + price_value`, and `city_key + price_value`.
+Existing documents are backfilled on the first API query after deployment.
