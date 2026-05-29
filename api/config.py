@@ -17,6 +17,9 @@ from LetMeRent.settings import (  # noqa: E402
 
 
 DEFAULT_SPIDERS = ("funda", "housinganywhere", "huurwoningen", "irentalize", "kamernet")
+USERS_COLLECTION = os.getenv("MONGODB_USERS_COLLECTION", "users")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+JWT_ACCESS_TOKEN_EXPIRES_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MINUTES", "60"))
 
 
 def configured_spiders():

@@ -1,6 +1,14 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from pymongo.errors import PyMongoError
 
+from api.auth import (
+    authenticate_user,
+    create_access_token,
+    create_user,
+    jwt_required,
+    public_user,
+    require_jwt_secret,
+)
 from api.config import configured_spiders
 from api.mongo import ListingRepository
 from api.serialization import json_safe
@@ -30,7 +38,65 @@ def _request_payload():
     return payload
 
 
+@api.post("/auth/register")
+def register():
+    payload = _request_payload()
+
+    try:
+        require_jwt_secret()
+        user = create_user(
+            email=payload.get("email"),
+            password=payload.get("password"),
+            username=payload.get("username"),
+        )
+        token, expires_at = create_access_token(user)
+    except ValueError as exc:
+        message = str(exc)
+        status = 409 if "already exists" in message else 400
+        return jsonify({"error": message}), status
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+        "user": json_safe(public_user(user)),
+    }), 201
+
+
+@api.post("/auth/login")
+def login():
+    payload = _request_payload()
+    try:
+        user = authenticate_user(payload.get("email"), payload.get("password"))
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if not user:
+        return jsonify({"error": "invalid email or password"}), 401
+
+    try:
+        token, expires_at = create_access_token(user)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+        "user": json_safe(public_user(user)),
+    })
+
+
+@api.get("/auth/me")
+@jwt_required()
+def me():
+    return jsonify({"user": json_safe(public_user(g.current_user))})
+
+
 @api.post("/spiders/run")
+#@jwt_required()
 def run_spiders():
     payload = _request_payload()
     spiders = payload.get("spiders") or configured_spiders()
