@@ -153,7 +153,12 @@ class IRentalizeSpider(scrapy.Spider):
             ".e-gallery-image::attr(data-thumbnail)"
         ).getall()
 
+        # Remove duplicate images
         images = list(dict.fromkeys(images))
+
+        # Remove first image because it is usually the iRentalize logo
+        if images:
+            images = images[1:]
 
         landlord = response.css(".elementor-author-box__name::text").get()
         status = self.extract_status(headings, all_text)
@@ -167,8 +172,13 @@ class IRentalizeSpider(scrapy.Spider):
             "title": title.strip() if title else None,
             "property_type": self.extract_property_type(headings),
             "city": self.extract_city(headings, all_text),
+
+            # Number only, without m²
             "living_area": self.extract_size(all_text),
+
+            # Number only, without "room" or "rooms"
             "rooms": self.extract_rooms(all_text),
+
             "availability": status,
             "status": status,
             "price": starting_price or base_rent,
@@ -204,19 +214,34 @@ class IRentalizeSpider(scrapy.Spider):
         return None
 
     def extract_size(self, text):
-        if "m²" in text:
-            before = text.split("m²", 1)[0]
-            return before.split()[-1] + "m²"
+        match = re.search(
+            r"(\d+(?:\.\d+)?)\s*m²",
+            text
+        )
+
+        if match:
+            return match.group(1)
+
         return None
 
     def extract_rooms(self, text):
-        if " rooms" in text:
-            before = text.split(" rooms", 1)[0]
-            return before.split()[-1] + " rooms"
+        match = re.search(
+            r"\d+(?:\.\d+)?\s*m²\s*-\s*\d+(?:\.\d+)?\s*m²,\s*(\d+)\s+rooms?",
+            text,
+            re.IGNORECASE
+        )
 
-        if " room" in text:
-            before = text.split(" room", 1)[0]
-            return before.split()[-1] + " room"
+        if match:
+            return match.group(1)
+
+        match = re.search(
+            r"for rent in\s+[A-Za-z]+\s+\d+(?:\.\d+)?\s*m²\s*-\s*\d+(?:\.\d+)?\s*m²,\s*(\d+)\s+rooms?",
+            text,
+            re.IGNORECASE
+        )
+
+        if match:
+            return match.group(1)
 
         return None
 
