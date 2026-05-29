@@ -21,6 +21,16 @@ listings = ListingRepository()
 spider_jobs = SpiderJobRunner()
 
 
+def _price_string(value):
+    if value is None:
+        return None
+
+    if float(value).is_integer():
+        return str(int(value))
+
+    return str(value)
+
+
 def _request_payload():
     payload = request.get_json(silent=True)
 
@@ -149,12 +159,21 @@ def get_data():
     # only return listings of that price range.
     min_price = request.args.get("min_price", type=float)
     max_price = request.args.get("max_price", type=float)
+    numeric_string_price = min_price is not None or max_price is not None
     if min_price is not None or max_price is not None:
-        mongo_filter["price"] = {}
+        numeric_price_filter = {}
+        string_price_filter = {}
         if min_price is not None:
-            mongo_filter["price"]["$gte"] = min_price  # $gte = "greater than or equal to"
+            numeric_price_filter["$gte"] = min_price  # $gte = "greater than or equal to"
+            string_price_filter["$gte"] = _price_string(min_price)
         if max_price is not None:
-            mongo_filter["price"]["$lte"] = max_price  # $lte = "less than or equal to"
+            numeric_price_filter["$lte"] = max_price  # $lte = "less than or equal to"
+            string_price_filter["$lte"] = _price_string(max_price)
+
+        mongo_filter["$or"] = [
+            {"price": numeric_price_filter},
+            {"price": string_price_filter},
+        ]
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
@@ -168,7 +187,12 @@ def get_data():
     # FETCH FROM DATABASE
     # If something goes wrong, return an error message.
     try:
-        documents, total = listings.find(mongo_filter, limit=limit, skip=skip)
+        documents, total = listings.find(
+            mongo_filter,
+            limit=limit,
+            skip=skip,
+            numeric_string_price=numeric_string_price,
+        )
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
