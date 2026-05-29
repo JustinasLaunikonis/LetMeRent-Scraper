@@ -87,6 +87,7 @@ ITEM_PIPELINES = {
 MONGODB_URI = os.getenv("MONGODB_URI")
 MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "letmerent")
 MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "listings")
+MONGODB_CHRONO_TASKS_COLLECTION = os.getenv("MONGODB_CHRONO_TASKS_COLLECTION", "chrono_tasks")
 MONGODB_UNIQUE_KEY = os.getenv("MONGODB_UNIQUE_KEY", "url")
 
 # Enable and configure the AutoThrottle extension (disabled by default)

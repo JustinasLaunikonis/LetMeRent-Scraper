@@ -10,6 +10,7 @@ if str(SCRAPY_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPY_PROJECT_DIR))
 
 from LetMeRent.settings import (  # noqa: E402
+    MONGODB_CHRONO_TASKS_COLLECTION,
     MONGODB_COLLECTION,
     MONGODB_DATABASE,
     MONGODB_URI,

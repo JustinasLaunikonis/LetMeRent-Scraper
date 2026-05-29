@@ -49,6 +49,7 @@ Create `LetMeRent/.env` from `LetMeRent/.env.example` and set:
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=letmerent
 MONGODB_COLLECTION=listings
+MONGODB_CHRONO_TASKS_COLLECTION=chrono_tasks
 MONGODB_UNIQUE_KEY=url
 SPIDERS=funda housinganywhere huurwoningen irentalize kamernet
 ```
@@ -66,6 +67,33 @@ latitude, longitude
 ```
 
 Site-specific data keeps its own field name, for example `agent_url`, `plot_size`, `city_filter`, `base_rent`, `service_fee`, `ideal_tenant`, and `srcset_images`.
+
+Chrono tasks are stored in the `chrono_tasks` collection by default. Each task
+stores `city`, `spider`, `max_price`, `user`, `schedule`, `timezone`, `enabled`,
+`status`, `min_price`, `next_run_at`, `last_run_at`, `last_error`, `created_at`,
+and `updated_at`.
+
+Create or update the chrono task collection and indexes:
+
+```sh
+python3 scripts/create_chrono_tasks_collection.py
+```
+
+Create a chrono task:
+
+```sh
+curl -X POST http://localhost:5000/chrono \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Amsterdam","spider":"kamernet","max_price":1200,"user":"user@example.com","schedule":"0 */6 * * *"}'
+```
+
+Fetch and delete chrono tasks:
+
+```sh
+curl http://localhost:5000/chrono
+curl http://localhost:5000/chrono/<task_id>
+curl -X DELETE http://localhost:5000/chrono/<task_id>
+```
 
 Run a spider from the Scrapy project directory:
 
