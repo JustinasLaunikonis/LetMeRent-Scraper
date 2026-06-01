@@ -20,7 +20,7 @@ class FundaSpider(scrapy.Spider):
         yield scrapy.Request(self._search_url(1), callback=self.parse, cb_kwargs={"page": 1})
 
     def _search_url(self, page):
-        return f'https://www.funda.nl/en/zoeken/koop?selected_area=["{self.city}"]&page={page}'
+        return f'https://www.funda.nl/zoeken/huur?object_type=%5B%22apartment%22%5D&selected_area=%5B%22{self.city}%22%5D&page={page}'
 
     def parse(self, response, page=1):
         listings = response.css(LISTING_SELECTOR)
@@ -28,7 +28,7 @@ class FundaSpider(scrapy.Spider):
 
         for address_link in listings:
             href = address_link.attrib.get("href", "")
-            if href:
+            if href and "/koophuur/" not in href and "/huur/" in href:
                 yield response.follow(href, callback=self.parse_detail)
 
         if listings:
