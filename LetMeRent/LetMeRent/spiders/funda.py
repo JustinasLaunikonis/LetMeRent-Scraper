@@ -20,7 +20,7 @@ class FundaSpider(scrapy.Spider):
         yield scrapy.Request(self._search_url(1), callback=self.parse, cb_kwargs={"page": 1})
 
     def _search_url(self, page):
-        return f'https://www.funda.nl/en/zoeken/koop?selected_area=["{self.city}"]&page={page}'
+        return f'https://www.funda.nl/en/zoeken/huur?selected_area=["{self.city}"]&page={page}'
 
     def parse(self, response, page=1):
         listings = response.css(LISTING_SELECTOR)
