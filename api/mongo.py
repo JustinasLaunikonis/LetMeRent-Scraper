@@ -1,6 +1,6 @@
+from bson import ObjectId
 from pymongo import ASCENDING, MongoClient
 from pymongo.collation import Collation
-from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
 from api.config import MONGODB_COLLECTION, MONGODB_DATABASE, MONGODB_URI, USERS_COLLECTION
@@ -65,13 +65,6 @@ class ListingRepository:
             cursor = collection.find(query)
             total = collection.count_documents(query)
         return list(cursor.skip(skip).limit(limit)), total
-        client = MongoClient(MONGODB_URI)
-        try:
-            cursor = client[MONGODB_DATABASE][MONGODB_COLLECTION].find(query)
-            total = client[MONGODB_DATABASE][MONGODB_COLLECTION].count_documents(query)
-            return list(cursor.skip(skip).limit(limit)), total
-        finally:
-            client.close()
 
     def delete_many(self, query: dict):
         if not MONGODB_URI:
@@ -131,3 +124,51 @@ class UserRepository:
             )
         finally:
             client.close()
+
+
+class ChronoTaskRepository:
+    def __init__(self):
+        self._client = None
+        self._indexes_ready = False
+
+    @property
+    def collection(self):
+        if not MONGODB_URI:
+            raise RuntimeError("MONGODB_URI is not configured. Add it to LetMeRent/.env.")
+
+        if self._client is None:
+            self._client = MongoClient(MONGODB_URI)
+
+        collection = self._client[MONGODB_DATABASE]["chrono_tasks"]
+
+        if not self._indexes_ready:
+            self.ensure_indexes(collection)
+            self._indexes_ready = True
+
+        return collection
+
+    def ensure_indexes(self, collection):
+        collection.create_index([("user", ASCENDING)], background=True)
+        collection.create_index([("spider", ASCENDING), ("city", ASCENDING)], background=True)
+
+    def create(self, task: dict):
+        result = self.collection.insert_one(task)
+        return self.collection.find_one({"_id": result.inserted_id})
+
+    def find(self, query: dict, limit: int = 100, skip: int = 0):
+        cursor = self.collection.find(query).sort("_id", ASCENDING)
+        total = self.collection.count_documents(query)
+        return list(cursor.skip(skip).limit(limit)), total
+
+    def get(self, task_id: str):
+        if not ObjectId.is_valid(task_id):
+            return None
+
+        return self.collection.find_one({"_id": ObjectId(task_id)})
+
+    def delete(self, task_id: str):
+        if not ObjectId.is_valid(task_id):
+            return 0
+
+        result = self.collection.delete_one({"_id": ObjectId(task_id)})
+        return result.deleted_count

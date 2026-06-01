@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from flask import Blueprint, g, jsonify, request
 from pymongo.errors import PyMongoError
 
@@ -10,14 +12,14 @@ from api.auth import (
     require_jwt_secret,
 )
 from api.config import configured_spiders
-from api.mongo import ListingRepository
+from api.mongo import ChronoTaskRepository, ListingRepository
 from api.serialization import json_safe
 from api.spider_jobs import SpiderJobRunner
-from datetime import datetime, timedelta, timezone
 
 
 api = Blueprint("api", __name__)
 listings = ListingRepository()
+chrono_tasks = ChronoTaskRepository()
 spider_jobs = SpiderJobRunner()
 
 
@@ -105,6 +107,41 @@ def me():
     return jsonify({"user": json_safe(public_user(g.current_user))})
 
 
+def _required_string(payload, field):
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        return None, f"{field} must be a non-empty string"
+
+    return value.strip(), None
+
+
+def _chrono_task_payload():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return None, "request body must be a JSON object"
+
+    task = {}
+    for field in ("user", "spider", "city"):
+        value, error = _required_string(payload, field)
+        if error:
+            return None, error
+        task[field] = value
+
+    time_between_scrap = payload.get("time_between_scrap")
+    if time_between_scrap is None:
+        time_between_scrap = payload.get("time_between_scrap_minutes")
+
+    if not isinstance(time_between_scrap, int) or time_between_scrap < 1:
+        return None, "time_between_scrap must be an integer greater than 0"
+
+    now = datetime.now(timezone.utc)
+    task["time_between_scrap"] = time_between_scrap
+    task["created_at"] = now
+    task["updated_at"] = now
+
+    return task, None
+
+
 @api.post("/spiders/run")
 #@jwt_required()
 def run_spiders():
@@ -132,6 +169,78 @@ def run_spiders():
         return jsonify({"error": "spiders are already running", "job": running_job}), 409
 
     return jsonify({"job": job}), 202
+
+
+@api.post("/chrono/tasks")
+def create_chrono_task():
+    task, error = _chrono_task_payload()
+    if error:
+        return jsonify({"error": error}), 400
+
+    try:
+        created_task = chrono_tasks.create(task)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"task": json_safe(created_task)}), 201
+
+
+@api.get("/chrono/tasks")
+def get_chrono_tasks():
+    mongo_filter = {}
+
+    user = request.args.get("user")
+    if user:
+        mongo_filter["user"] = user.strip()
+
+    spider = request.args.get("spider")
+    if spider:
+        mongo_filter["spider"] = spider.strip()
+
+    city = request.args.get("city")
+    if city:
+        mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
+
+    limit = request.args.get("limit", default=50, type=int)
+    skip = request.args.get("skip", default=0, type=int)
+    limit = max(1, min(limit, 500))
+
+    try:
+        documents, total = chrono_tasks.find(mongo_filter, limit=limit, skip=skip)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({
+        "count": total,
+        "returned": len(documents),
+        "data": json_safe(documents),
+    })
+
+
+@api.get("/chrono/tasks/<task_id>")
+def get_chrono_task(task_id):
+    try:
+        task = chrono_tasks.get(task_id)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if task is None:
+        return jsonify({"error": "task not found"}), 404
+
+    return jsonify({"task": json_safe(task)})
+
+
+@api.delete("/chrono/tasks/<task_id>")
+def delete_chrono_task(task_id):
+    try:
+        deleted_count = chrono_tasks.delete(task_id)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if deleted_count == 0:
+        return jsonify({"error": "task not found"}), 404
+
+    return "", 204
 
 
 @api.get("/data")
