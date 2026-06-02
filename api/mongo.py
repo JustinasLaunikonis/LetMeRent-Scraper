@@ -148,15 +148,50 @@ class ChronoTaskRepository:
         return collection
 
     def ensure_indexes(self, collection):
-        collection.create_index([("user", ASCENDING)], background=True)
+        self.delete_duplicate_user_tasks(collection)
+        self.ensure_unique_user_index(collection)
         collection.create_index([("spider", ASCENDING), ("city", ASCENDING)], background=True)
         collection.create_index([("university_campus", ASCENDING)], background=True)
         collection.create_index([("room_type", ASCENDING), ("furnishing", ASCENDING)], background=True)
         collection.create_index([("pet_friendly", ASCENDING)], background=True)
 
+    def ensure_unique_user_index(self, collection):
+        existing_index = collection.index_information().get("user_1")
+        if existing_index and not existing_index.get("unique"):
+            collection.drop_index("user_1")
+
+        collection.create_index([("user", ASCENDING)], background=True, unique=True)
+
+    def delete_duplicate_user_tasks(self, collection):
+        duplicates = collection.aggregate([
+            {"$sort": {"_id": -1}},
+            {
+                "$group": {
+                    "_id": "$user",
+                    "keep": {"$first": "$_id"},
+                    "delete": {"$push": "$_id"},
+                    "count": {"$sum": 1},
+                }
+            },
+            {"$match": {"_id": {"$ne": None}, "count": {"$gt": 1}}},
+        ])
+
+        for duplicate in duplicates:
+            task_ids = [task_id for task_id in duplicate["delete"] if task_id != duplicate["keep"]]
+            if task_ids:
+                collection.delete_many({"_id": {"$in": task_ids}})
+
     def create(self, task: dict):
-        result = self.collection.insert_one(task)
-        return self.collection.find_one({"_id": result.inserted_id})
+        collection = self.collection
+        collection.delete_many({"user": task["user"]})
+
+        try:
+            result = collection.insert_one(task)
+        except DuplicateKeyError:
+            collection.delete_many({"user": task["user"]})
+            result = collection.insert_one(task)
+
+        return collection.find_one({"_id": result.inserted_id})
 
     def find(self, query: dict, limit: int = 100, skip: int = 0):
         cursor = self.collection.find(query).sort("_id", ASCENDING)
