@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 from pymongo.errors import PyMongoError
@@ -115,6 +115,85 @@ def _required_string(payload, field):
     return value.strip(), None
 
 
+CHRONO_STRING_FIELDS = (
+    "university_campus",
+    "room_type",
+    "furnishing",
+)
+
+CHRONO_NUMERIC_FIELDS = (
+    "min_budget",
+    "max_budget",
+    "min_lease_length",
+    "max_distance_from_campus",
+    "minimum_match_score",
+)
+
+
+def _optional_number(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if isinstance(value, bool):
+        return None, f"{field} must be a number"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None, f"{field} must be a number"
+
+    if number < 0:
+        return None, f"{field} must be greater than or equal to 0"
+
+    if number.is_integer():
+        return int(number), None
+
+    return number, None
+
+
+def _query_number(field):
+    if field not in request.args:
+        return None, None
+
+    return _optional_number(request.args, field)
+
+
+def _optional_bool(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if isinstance(value, bool):
+        return value, None
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1", "yes"):
+            return True, None
+        if normalized in ("false", "0", "no"):
+            return False, None
+
+    return None, f"{field} must be a boolean"
+
+
+def _optional_date(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if not isinstance(value, str):
+        return None, f"{field} must be a date string in YYYY-MM-DD format"
+
+    normalized = value.strip()
+    try:
+        date.fromisoformat(normalized)
+    except ValueError:
+        return None, f"{field} must be a date string in YYYY-MM-DD format"
+
+    return normalized, None
+
+
 def _chrono_task_payload():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -133,6 +212,39 @@ def _chrono_task_payload():
 
     if not isinstance(time_between_scrap, int) or time_between_scrap < 1:
         return None, "time_between_scrap must be an integer greater than 0"
+
+    for field in CHRONO_STRING_FIELDS:
+        value = payload.get(field)
+        if value is not None and value != "":
+            if not isinstance(value, str):
+                return None, f"{field} must be a string"
+            task[field] = value.strip()
+
+    for field in CHRONO_NUMERIC_FIELDS:
+        value, error = _optional_number(payload, field)
+        if error:
+            return None, error
+        if value is not None:
+            task[field] = value
+
+    if (
+        task.get("min_budget") is not None
+        and task.get("max_budget") is not None
+        and task["min_budget"] > task["max_budget"]
+    ):
+        return None, "min_budget must be less than or equal to max_budget"
+
+    move_in_date, error = _optional_date(payload, "move_in_date")
+    if error:
+        return None, error
+    if move_in_date is not None:
+        task["move_in_date"] = move_in_date
+
+    pet_friendly, error = _optional_bool(payload, "pet_friendly")
+    if error:
+        return None, error
+    if pet_friendly is not None:
+        task["pet_friendly"] = pet_friendly
 
     now = datetime.now(timezone.utc)
     task["time_between_scrap"] = time_between_scrap
@@ -200,6 +312,29 @@ def get_chrono_tasks():
     city = request.args.get("city")
     if city:
         mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
+
+    for field in CHRONO_STRING_FIELDS:
+        value = request.args.get(field)
+        if value:
+            mongo_filter[field] = {"$regex": value.strip(), "$options": "i"}
+
+    for field in CHRONO_NUMERIC_FIELDS:
+        value, error = _query_number(field)
+        if error:
+            return jsonify({"error": error}), 400
+        if value is not None:
+            mongo_filter[field] = value
+
+    move_in_date = request.args.get("move_in_date")
+    if move_in_date:
+        mongo_filter["move_in_date"] = move_in_date.strip()
+
+    pet_friendly = request.args.get("pet_friendly")
+    if pet_friendly:
+        value, error = _optional_bool({"pet_friendly": pet_friendly}, "pet_friendly")
+        if error:
+            return jsonify({"error": error}), 400
+        mongo_filter["pet_friendly"] = value
 
     limit = request.args.get("limit", default=50, type=int)
     skip = request.args.get("skip", default=0, type=int)

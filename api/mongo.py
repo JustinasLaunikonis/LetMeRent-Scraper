@@ -150,6 +150,9 @@ class ChronoTaskRepository:
     def ensure_indexes(self, collection):
         collection.create_index([("user", ASCENDING)], background=True)
         collection.create_index([("spider", ASCENDING), ("city", ASCENDING)], background=True)
+        collection.create_index([("university_campus", ASCENDING)], background=True)
+        collection.create_index([("room_type", ASCENDING), ("furnishing", ASCENDING)], background=True)
+        collection.create_index([("pet_friendly", ASCENDING)], background=True)
 
     def create(self, task: dict):
         result = self.collection.insert_one(task)
