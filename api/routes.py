@@ -436,6 +436,7 @@ def get_data():
             {"price": string_price_filter},
         ]
 
+
     created_after = request.args.get("created_after")
 
     if created_after:
@@ -449,6 +450,12 @@ def get_data():
         mongo_filter["created_at"] = {
             "$gte": created_after_date
         }
+        print("=" * 50)
+        print("created_after:", created_after)
+        print("created_after_date:", created_after_date)
+        print("created_after_date tzinfo:", created_after_date.tzinfo)
+        print("mongo_filter:", mongo_filter)
+        print("=" * 50)
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
@@ -459,6 +466,7 @@ def get_data():
     skip = request.args.get("skip", default=0, type=int)
     limit = max(1, min(limit, 500))
 
+
     # FETCH FROM DATABASE
     # If something goes wrong, return an error message.
     try:
@@ -468,6 +476,10 @@ def get_data():
             skip=skip,
             numeric_string_price=numeric_string_price,
         )
+        print("Found documents:", total)
+
+        if documents:
+            print("First document created_at:", documents[0].get("created_at"))
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
