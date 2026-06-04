@@ -447,7 +447,7 @@ def get_data():
             return jsonify({"error": "created_after must be ISO datetime"}), 400
 
         mongo_filter["created_at"] = {
-            "$gte": created_after_date.replace(tzinfo=None).isoformat()
+            "$gte": created_after_date
         }
 
     # PAGINATION
