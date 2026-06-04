@@ -551,3 +551,12 @@ def delete_old_listings():
         "cutoff_date": cutoff_date.isoformat(),
         "deleted": delete_result.deleted_count
     })
+
+@api.get("/spiders/jobs/<job_id>")
+def get_spider_job(job_id):
+    job = spider_jobs.get(job_id)
+
+    if job is None:
+        return jsonify({"error": "job not found"}), 404
+
+    return jsonify({"job": json_safe(job)})
