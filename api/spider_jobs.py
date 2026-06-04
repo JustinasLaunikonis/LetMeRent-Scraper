@@ -106,6 +106,15 @@ class SpiderJobRunner:
         thread.start()
         return thread
 
+    def get(self, job_id):
+        with self._job_lock:
+            job = self._jobs.get(job_id)
+
+            if job is None:
+                return None
+
+            return dict(job)
+
     @staticmethod
     def _drain_stream(stream, level, job_id, spider, stream_name):
         for line in iter(stream.readline, ""):
