@@ -436,6 +436,20 @@ def get_data():
             {"price": string_price_filter},
         ]
 
+    created_after = request.args.get("created_after")
+
+    if created_after:
+        try:
+            created_after_date = datetime.fromisoformat(
+                created_after.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return jsonify({"error": "created_after must be ISO datetime"}), 400
+
+        mongo_filter["created_at"] = {
+            "$gte": created_after_date
+        }
+
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
     # ?limit=50 = "show 50 listings"
