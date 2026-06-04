@@ -352,6 +352,23 @@ def get_chrono_tasks():
     })
 
 
+@api.get("/chrono/tasks/user/<path:user>")
+def get_chrono_task_by_user(user):
+    user = user.strip()
+    if not user:
+        return jsonify({"error": "user must be a non-empty string"}), 400
+
+    try:
+        task = chrono_tasks.get_by_user(user)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if task is None:
+        return jsonify({"error": "task not found"}), 404
+
+    return jsonify({"task": json_safe(task)})
+
+
 @api.get("/chrono/tasks/<task_id>")
 def get_chrono_task(task_id):
     try:

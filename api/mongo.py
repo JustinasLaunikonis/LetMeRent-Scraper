@@ -204,6 +204,9 @@ class ChronoTaskRepository:
 
         return self.collection.find_one({"_id": ObjectId(task_id)})
 
+    def get_by_user(self, user: str):
+        return self.collection.find_one({"user": user})
+
     def delete(self, task_id: str):
         if not ObjectId.is_valid(task_id):
             return 0
