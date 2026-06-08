@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
+from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
 
 from api.auth import (
@@ -457,6 +458,28 @@ def get_data():
         print("mongo_filter:", mongo_filter)
         print("=" * 50)
 
+    # SORTING
+    # ?sort=price&order=asc   -> cheapest first
+    # ?sort=price&order=desc  -> most expensive first
+    # Sorting is done by MongoDB itself (not in PHP/JS). Only a whitelist of
+    # fields is allowed so a user can't sort on arbitrary/unindexed fields.
+    SORTABLE_FIELDS = {"price", "created_at"}
+    sort = None
+    sort_field = request.args.get("sort")
+    if sort_field:
+        sort_field = sort_field.strip()
+        if sort_field not in SORTABLE_FIELDS:
+            return jsonify({
+                "error": f"sort must be one of: {', '.join(sorted(SORTABLE_FIELDS))}"
+            }), 400
+
+        order = request.args.get("order", default="asc").strip().lower()
+        if order not in ("asc", "desc"):
+            return jsonify({"error": "order must be 'asc' or 'desc'"}), 400
+
+        direction = ASCENDING if order == "asc" else DESCENDING
+        sort = [(sort_field, direction)]
+
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
     # ?limit=50 = "show 50 listings"
@@ -475,6 +498,7 @@ def get_data():
             limit=limit,
             skip=skip,
             numeric_string_price=numeric_string_price,
+            sort=sort,
         )
         print("Found documents:", total)
 
