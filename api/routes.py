@@ -417,10 +417,16 @@ def get_data():
     # single request instead of the frontend merging per-source responses.
     source = request.args.get("source")
     if source:
-        source_list = [s.strip().lower() for s in source.split(",") if s.strip()]
+        # Split "funda,kamernet" into a clean list, one source per item.
+        source_list = []
+        for part in source.split(","):
+            part = part.strip().lower()
+            if part != "":
+                source_list.append(part)
+
         if len(source_list) == 1:
             mongo_filter["source"] = source_list[0]
-        elif source_list:
+        elif len(source_list) > 1:
             mongo_filter["source"] = {"$in": source_list}
 
     # PRICE FILTER
@@ -470,21 +476,28 @@ def get_data():
     # ?sort=price&order=desc  -> most expensive first
     # Sorting is done by MongoDB itself (not in PHP/JS). Only a whitelist of
     # fields is allowed so a user can't sort on arbitrary/unindexed fields.
-    SORTABLE_FIELDS = {"price", "created_at"}
+    # The fields we allow sorting on. We keep this as a short list so a user
+    # cannot sort on some random field.
+    sortable_fields = ["price", "created_at"]
     sort = None
     sort_field = request.args.get("sort")
     if sort_field:
         sort_field = sort_field.strip()
-        if sort_field not in SORTABLE_FIELDS:
+        if sort_field not in sortable_fields:
             return jsonify({
-                "error": f"sort must be one of: {', '.join(sorted(SORTABLE_FIELDS))}"
+                "error": "sort must be one of: price, created_at"
             }), 400
 
         order = request.args.get("order", default="asc").strip().lower()
         if order not in ("asc", "desc"):
             return jsonify({"error": "order must be 'asc' or 'desc'"}), 400
 
-        direction = ASCENDING if order == "asc" else DESCENDING
+        # Pick the sort direction with a simple if/else.
+        if order == "asc":
+            direction = ASCENDING
+        else:
+            direction = DESCENDING
+
         sort = [(sort_field, direction)]
 
         # Listings without a price are meaningless in a price-sorted view, and

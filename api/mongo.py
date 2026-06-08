@@ -58,7 +58,15 @@ class ListingRepository:
 
     def find(self, query: dict, limit: int = 100, skip: int = 0, numeric_string_price: bool = False, sort=None):
         collection = self.collection
-        sorts_by_price = bool(sort) and any(field == "price" for field, _ in sort)
+
+        # Check if we are sorting by price, and remember which direction.
+        sorts_by_price = False
+        price_direction = ASCENDING
+        if sort:
+            for field, field_direction in sort:
+                if field == "price":
+                    sorts_by_price = True
+                    price_direction = field_direction
 
         if sorts_by_price:
             # price is stored inconsistently across sources: Funda uses numbers
@@ -67,7 +75,7 @@ class ListingRepository:
             # strings), so a plain .sort() effectively sorts each source on its
             # own. Convert price to a number first so every source sorts together
             # as one global list.
-            direction = dict(sort)["price"]
+            direction = price_direction
             pipeline = [
                 {"$match": query},
                 {"$addFields": {
