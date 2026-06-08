@@ -478,6 +478,64 @@ def get_data():
 
         mongo_filter["$expr"] = {"$and": rooms_conditions}
 
+    # TAG PRESENCE FILTER ("has" the tag or not)
+    # ?has=energy_label,furnished  -> only listings that HAVE those fields
+    # filled in. Each tag shown on a card maps to one or more database fields.
+    # A field counts as "present" when it exists and is not null or empty.
+    # Some tags can come from more than one field (for example the home type is
+    # stored as either "Type apartment" or "Kind of house"), so any of the
+    # listed fields being present is enough for that tag.
+    has_field_map = {
+        "furnished": ["furnished", "interior"],
+        "housemates": ["housemates"],
+        "plot_size": ["plot_size"],
+        "bathrooms": ["features.Number of bath rooms"],
+    }
+
+    has = request.args.get("has")
+    if has:
+        # Each selected tag becomes one condition. All selected tags must be
+        # present, so we collect them in a list and join them with $and.
+        has_conditions = []
+        for part in has.split(","):
+            key = part.strip().lower()
+            if key == "":
+                continue
+            if key not in has_field_map:
+                continue
+
+            fields = has_field_map[key]
+            if len(fields) == 1:
+                # Only one field to check for this tag.
+                has_conditions.append({
+                    fields[0]: {"$exists": True, "$nin": [None, ""]}
+                })
+            else:
+                # The tag can come from several fields, so any one of them
+                # being present is enough.
+                or_list = []
+                for field in fields:
+                    or_list.append({field: {"$exists": True, "$nin": [None, ""]}})
+                has_conditions.append({"$or": or_list})
+
+        if has_conditions:
+            mongo_filter["$and"] = has_conditions
+
+    # ENERGY LABEL FILTER
+    # ?energy_label=A  -> listings whose energy label is in that class.
+    # Labels are stored inconsistently (A, A+, A+++, A3, ...), so we match on
+    # the first letter. That groups all the A-class labels together, all the
+    # B-class together, and so on. Only single letters A to G are allowed.
+    energy_label = request.args.get("energy_label")
+    if energy_label:
+        letter = energy_label.strip().upper()
+        allowed_letters = ["A", "B", "C", "D", "E", "F", "G"]
+        if letter in allowed_letters:
+            mongo_filter["energy_label"] = {
+                "$regex": "^" + letter,
+                "$options": "i",
+            }
+
     created_after = request.args.get("created_after")
 
     if created_after:
