@@ -411,10 +411,17 @@ def get_data():
         mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
 
     # SOURCE FILTER
-    # If the URL contains ?source=kamernet, only return listings from that website.
+    # ?source=kamernet              -> only that website
+    # ?source=funda,kamernet,...    -> any of those websites (sorted together)
+    # Accepting several sources at once lets the API sort across all of them in a
+    # single request instead of the frontend merging per-source responses.
     source = request.args.get("source")
     if source:
-        mongo_filter["source"] = source.strip().lower()
+        source_list = [s.strip().lower() for s in source.split(",") if s.strip()]
+        if len(source_list) == 1:
+            mongo_filter["source"] = source_list[0]
+        elif source_list:
+            mongo_filter["source"] = {"$in": source_list}
 
     # PRICE FILTER
     # If the URL contains ?min_price=500 and/or ?max_price=1200
@@ -479,6 +486,12 @@ def get_data():
 
         direction = ASCENDING if order == "asc" else DESCENDING
         sort = [(sort_field, direction)]
+
+        # Listings without a price are meaningless in a price-sorted view, and
+        # Mongo orders null below any number so they would clump at the very top
+        # on an ascending sort. Exclude them whenever we sort by price.
+        if sort_field == "price":
+            mongo_filter["price"] = {"$ne": None}
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
