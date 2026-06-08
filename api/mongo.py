@@ -1,5 +1,5 @@
 from bson import ObjectId
-from pymongo import ASCENDING, MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.collation import Collation
 from pymongo.errors import DuplicateKeyError
 
@@ -56,14 +56,20 @@ class ListingRepository:
     def all(self):
         return list(self.collection.find({}))
 
-    def find(self, query: dict, limit: int = 100, skip: int = 0, numeric_string_price: bool = False):
+    def find(self, query: dict, limit: int = 100, skip: int = 0, numeric_string_price: bool = False, sort=None):
         collection = self.collection
-        if numeric_string_price:
+        # Use the numeric-ordering collation when filtering on price ranges OR
+        # when sorting by price, so string-stored prices ("900", "1000") order
+        # numerically instead of lexicographically ("1000" < "900").
+        sorts_by_price = bool(sort) and any(field == "price" for field, _ in sort)
+        if numeric_string_price or sorts_by_price:
             cursor = collection.find(query, collation=NUMERIC_STRING_COLLATION)
             total = collection.count_documents(query, collation=NUMERIC_STRING_COLLATION)
         else:
             cursor = collection.find(query)
             total = collection.count_documents(query)
+        if sort:
+            cursor = cursor.sort(sort)
         return list(cursor.skip(skip).limit(limit)), total
 
     def delete_many(self, query: dict):
