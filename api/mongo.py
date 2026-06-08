@@ -58,11 +58,40 @@ class ListingRepository:
 
     def find(self, query: dict, limit: int = 100, skip: int = 0, numeric_string_price: bool = False, sort=None):
         collection = self.collection
-        # Use the numeric-ordering collation when filtering on price ranges OR
-        # when sorting by price, so string-stored prices ("900", "1000") order
-        # numerically instead of lexicographically ("1000" < "900").
         sorts_by_price = bool(sort) and any(field == "price" for field, _ in sort)
-        if numeric_string_price or sorts_by_price:
+
+        if sorts_by_price:
+            # price is stored inconsistently across sources: Funda uses numbers
+            # (17000) while others use numeric strings ("850"). MongoDB sorts
+            # different BSON types in separate brackets (all numbers, then all
+            # strings), so a plain .sort() effectively sorts each source on its
+            # own. Convert price to a number first so every source sorts together
+            # as one global list.
+            direction = dict(sort)["price"]
+            pipeline = [
+                {"$match": query},
+                {"$addFields": {
+                    "_price_num": {
+                        "$convert": {
+                            "input": "$price",
+                            "to": "double",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    }
+                }},
+                # Drop anything whose price could not be parsed to a real number.
+                {"$match": {"_price_num": {"$ne": None}}},
+                {"$sort": {"_price_num": direction}},
+                {"$skip": skip},
+                {"$limit": limit},
+                {"$project": {"_price_num": 0}},
+            ]
+            documents = list(collection.aggregate(pipeline))
+            total = collection.count_documents(query)
+            return documents, total
+
+        if numeric_string_price:
             cursor = collection.find(query, collation=NUMERIC_STRING_COLLATION)
             total = collection.count_documents(query, collation=NUMERIC_STRING_COLLATION)
         else:
