@@ -450,6 +450,33 @@ def get_data():
             {"price": string_price_filter},
         ]
 
+    # ROOMS FILTER
+    # ?min_rooms=1&max_rooms=1  -> exactly 1 room
+    # ?min_rooms=2&max_rooms=2  -> exactly 2 rooms
+    # ?min_rooms=3              -> 3 or more rooms (no upper limit)
+    # rooms is stored as a number on some sources and a numeric string on
+    # others, so we convert it to a number before comparing.
+    min_rooms = request.args.get("min_rooms", type=int)
+    max_rooms = request.args.get("max_rooms", type=int)
+    if min_rooms is not None or max_rooms is not None:
+        # Turn the stored rooms value into a number. If it is missing or is not
+        # a number, this becomes null and the listing is left out.
+        rooms_as_number = {
+            "$convert": {
+                "input": "$rooms",
+                "to": "double",
+                "onError": None,
+                "onNull": None,
+            }
+        }
+
+        rooms_conditions = [{"$ne": [rooms_as_number, None]}]
+        if min_rooms is not None:
+            rooms_conditions.append({"$gte": [rooms_as_number, min_rooms]})
+        if max_rooms is not None:
+            rooms_conditions.append({"$lte": [rooms_as_number, max_rooms]})
+
+        mongo_filter["$expr"] = {"$and": rooms_conditions}
 
     created_after = request.args.get("created_after")
 
