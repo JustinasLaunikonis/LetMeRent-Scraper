@@ -226,15 +226,23 @@ class ChronoTaskRepository:
 
     def create(self, task: dict):
         collection = self.collection
-        collection.delete_many({"user": task["user"]})
+        created_at = task.pop("created_at", None)
 
-        try:
-            result = collection.insert_one(task)
-        except DuplicateKeyError:
-            collection.delete_many({"user": task["user"]})
-            result = collection.insert_one(task)
+        collection.update_one(
+            {"user": task["user"]},
+            {
+                "$set": task,
+                "$setOnInsert": {"created_at": created_at or task.get("updated_at")},
+                "$unset": {
+                    "time_between_scrap": "",
+                    "time_between_scrap_minutes": "",
+                    "minimum_match_score": "",
+                },
+            },
+            upsert=True,
+        )
 
-        return collection.find_one({"_id": result.inserted_id})
+        return collection.find_one({"user": task["user"]})
 
     def find(self, query: dict, limit: int = 100, skip: int = 0):
         cursor = self.collection.find(query).sort("_id", ASCENDING)

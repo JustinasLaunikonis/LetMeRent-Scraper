@@ -117,6 +117,8 @@ def _required_string(payload, field):
 
 
 CHRONO_STRING_FIELDS = (
+    "spider",
+    "city",
     "university_campus",
     "room_type",
     "furnishing",
@@ -127,6 +129,27 @@ CHRONO_NUMERIC_FIELDS = (
     "max_budget",
     "min_lease_length",
     "max_distance_from_campus",
+)
+
+CHRONO_RESPONSE_FIELDS = (
+    "user",
+    "spider",
+    "city",
+    "university_campus",
+    "min_budget",
+    "max_budget",
+    "move_in_date",
+    "min_lease_length",
+    "max_distance_from_campus",
+    "room_type",
+    "furnishing",
+    "pet_friendly",
+    "updated_at",
+)
+
+REMOVED_CHRONO_FIELDS = (
+    "time_between_scrap",
+    "time_between_scrap_minutes",
     "minimum_match_score",
 )
 
@@ -195,28 +218,31 @@ def _optional_date(payload, field):
     return normalized, None
 
 
+def _chrono_task_response(task):
+    response = {field: task.get(field) for field in CHRONO_RESPONSE_FIELDS}
+    if "_id" in task:
+        response["_id"] = task["_id"]
+    if "created_at" in task:
+        response["created_at"] = task["created_at"]
+    return response
+
+
 def _chrono_task_payload():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return None, "request body must be a JSON object"
 
     task = {}
-    for field in ("user", "spider", "city"):
-        value, error = _required_string(payload, field)
-        if error:
-            return None, error
-        task[field] = value
-
-    time_between_scrap = payload.get("time_between_scrap")
-    if time_between_scrap is None:
-        time_between_scrap = payload.get("time_between_scrap_minutes")
-
-    if not isinstance(time_between_scrap, int) or time_between_scrap < 1:
-        return None, "time_between_scrap must be an integer greater than 0"
+    value, error = _required_string(payload, "user")
+    if error:
+        return None, error
+    task["user"] = value
 
     for field in CHRONO_STRING_FIELDS:
         value = payload.get(field)
-        if value is not None and value != "":
+        if value is None or value == "":
+            task[field] = None
+        else:
             if not isinstance(value, str):
                 return None, f"{field} must be a string"
             task[field] = value.strip()
@@ -225,8 +251,7 @@ def _chrono_task_payload():
         value, error = _optional_number(payload, field)
         if error:
             return None, error
-        if value is not None:
-            task[field] = value
+        task[field] = value
 
     if (
         task.get("min_budget") is not None
@@ -238,19 +263,19 @@ def _chrono_task_payload():
     move_in_date, error = _optional_date(payload, "move_in_date")
     if error:
         return None, error
-    if move_in_date is not None:
-        task["move_in_date"] = move_in_date
+    task["move_in_date"] = move_in_date
 
     pet_friendly, error = _optional_bool(payload, "pet_friendly")
     if error:
         return None, error
-    if pet_friendly is not None:
-        task["pet_friendly"] = pet_friendly
+    task["pet_friendly"] = pet_friendly
 
     now = datetime.now(timezone.utc)
-    task["time_between_scrap"] = time_between_scrap
     task["created_at"] = now
     task["updated_at"] = now
+
+    for field in REMOVED_CHRONO_FIELDS:
+        task.pop(field, None)
 
     return task, None
 
@@ -295,7 +320,7 @@ def create_chrono_task():
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
-    return jsonify({"task": json_safe(created_task)}), 201
+    return jsonify({"data": json_safe(_chrono_task_response(created_task))}), 201
 
 
 @api.get("/chrono/tasks")
@@ -346,6 +371,8 @@ def get_chrono_tasks():
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
+    documents = [_chrono_task_response(document) for document in documents]
+
     return jsonify({
         "count": total,
         "returned": len(documents),
@@ -367,7 +394,7 @@ def get_chrono_task_by_user(user):
     if task is None:
         return jsonify({"error": "task not found"}), 404
 
-    return jsonify({"task": json_safe(task)})
+    return jsonify({"data": json_safe(_chrono_task_response(task))})
 
 
 @api.get("/chrono/tasks/<task_id>")
@@ -380,7 +407,7 @@ def get_chrono_task(task_id):
     if task is None:
         return jsonify({"error": "task not found"}), 404
 
-    return jsonify({"task": json_safe(task)})
+    return jsonify({"data": json_safe(_chrono_task_response(task))})
 
 
 @api.delete("/chrono/tasks/<task_id>")
