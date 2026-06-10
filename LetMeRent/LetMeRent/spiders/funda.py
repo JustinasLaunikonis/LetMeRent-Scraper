@@ -262,10 +262,29 @@ class FundaSpider(scrapy.Spider):
         if phone_href:
             phone = phone_href.replace("tel:", "")
 
-        image = response.css("#media .col-span-2 img::attr(src)").get("")
+        # Build the list of photo URLs from the listing data we already read.
+        # This works even when the page layout changes, sometimes Funda shows a gallery, sometimes just one photo
         images = []
-        if image:
-            images = [image]
+        media = listing.get("media") or {}
+        photos = media.get("photos") or {}
+        base_url = photos.get("mediaBaseUrl") or ""
+        photo_items = photos.get("items") or []
+        if base_url:
+            for photo in photo_items:
+                photo_id = photo.get("id")
+                if photo_id:
+                    image_url = base_url.replace("{id}", photo_id)
+                    images.append(image_url)
+
+        # Fallbacks in case the data had no photos
+        if not images:
+            og_image = response.css('meta[property="og:image"]::attr(content)').get("")
+            if og_image:
+                images = [og_image]
+        if not images:
+            image = response.css("#media .col-span-2 img::attr(src)").get("")
+            if image:
+                images = [image]
 
         yield {
             "url": response.url,
