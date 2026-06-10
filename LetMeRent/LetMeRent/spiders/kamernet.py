@@ -1,7 +1,31 @@
 import scrapy
 import re
+from urllib.parse import urlparse, parse_qs, unquote
 
 from LetMeRent.spiders.city_utils import city_slug
+
+
+def full_size_image(image_url):
+    # Kamernet shows photos through Next.js image optimizer, which gives a small low quality thumbnail.
+    # The URL looks like: /_next/image?url=https%3A%2F%2Fresources.kamernet.nl%2Fimage%2F<id>&w=640&q=75
+    # The original full-quality photo is the "url" value inside that link,
+    # so we can pull it out and use that instead.
+    # Other URLs are returned unchanged.
+    if image_url is None:
+        return ""
+
+    if "/_next/image" not in image_url:
+        return image_url
+
+    # Read the query part of the URL and look for the "url" parameter
+    query_part = urlparse(image_url).query
+    query_values = parse_qs(query_part)
+
+    if "url" in query_values:
+        original = query_values["url"][0]
+        return unquote(original)
+
+    return image_url
 
 
 def extract_number(text):
@@ -39,8 +63,10 @@ class KamernetSpider(scrapy.Spider):
             else:
                 url = ""
 
-            # First image shown on the card
+            # First image shown on the card.
+            # Upgrade it from the small thumbnail to the original full-quality photo.
             image = card.css("img::attr(src)").get("")
+            image = full_size_image(image)
 
             # Street/address text.
             # It can contain a comma, so we remove it comma
