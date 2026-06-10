@@ -2,7 +2,7 @@ import re
 import json
 import scrapy
 
-from LetMeRent.spiders.city_utils import city_slug, normalize_status
+from LetMeRent.spiders.city_utils import city_slug, normalize_status, normalize_availability
 
 LISTING_SELECTOR = '[data-testid="listingDetailsAddress"]'
 
@@ -261,7 +261,7 @@ class FundaSpider(scrapy.Spider):
         # Common status / availability fields, stored the same way as the other spiders.
         # "Acceptance" is the move-in text (for example "Available immediately" or "Available on 8/1/2026")
         # "Status" is the listing state (for example "Available" or "Under option")
-        availability = features.get("Acceptance", "")
+        availability = normalize_availability(features.get("Acceptance", ""))
         status = normalize_status(raw_status)
 
         # Agent details and the main photo
