@@ -12,6 +12,7 @@ class SpiderJobRunner:
     def __init__(self):
         self._job_lock = threading.Lock()
         self._current_job = None
+        self._jobs = {}
 
     def start(self, spiders, city=None, extra_args=None):
         extra_args = list(extra_args or [])
@@ -23,10 +24,7 @@ class SpiderJobRunner:
         docker_log("INFO", f"spider_job_request spiders={spiders} city={city} extra_args={extra_args}")
 
         with self._job_lock:
-            if self._current_job and self._current_job.get("status") == "running":
-                return None, self._current_job
-
-            self._current_job = {
+            job = {
                 "id": job_id,
                 "status": "running",
                 "spiders": spiders,
@@ -34,7 +32,8 @@ class SpiderJobRunner:
                 "args": extra_args,
                 "started_at": utc_now(),
             }
-            job = self._current_job
+            self._jobs[job_id] = job
+            self._current_job = job
 
         thread = threading.Thread(target=self._run, args=(job_id, spiders, extra_args), daemon=True)
         thread.start()
@@ -55,13 +54,16 @@ class SpiderJobRunner:
         docker_log("INFO", f"spider_job_finished job_id={job_id} status={status}")
 
         with self._job_lock:
-            self._current_job = {
+            job = self._jobs.get(job_id, {"id": job_id})
+            job.update({
                 "id": job_id,
                 "status": status,
                 "spiders": spiders,
                 "results": results,
                 "finished_at": utc_now(),
-            }
+            })
+            self._jobs[job_id] = job
+            self._current_job = job
 
     def _run_spider(self, job_id, spider, extra_args):
         docker_log("INFO", f"spider_job_spider_started job_id={job_id} spider={spider}")
@@ -103,6 +105,15 @@ class SpiderJobRunner:
         )
         thread.start()
         return thread
+
+    def get(self, job_id):
+        with self._job_lock:
+            job = self._jobs.get(job_id)
+
+            if job is None:
+                return None
+
+            return dict(job)
 
     @staticmethod
     def _drain_stream(stream, level, job_id, spider, stream_name):

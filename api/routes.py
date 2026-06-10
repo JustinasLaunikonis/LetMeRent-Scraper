@@ -1,4 +1,7 @@
+from datetime import date, datetime, timedelta, timezone
+
 from flask import Blueprint, g, jsonify, request
+from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
 
 from api.auth import (
@@ -10,14 +13,14 @@ from api.auth import (
     require_jwt_secret,
 )
 from api.config import configured_spiders
-from api.mongo import ListingRepository
+from api.mongo import ChronoTaskRepository, ListingRepository
 from api.serialization import json_safe
 from api.spider_jobs import SpiderJobRunner
-from datetime import datetime, timedelta, timezone
 
 
 api = Blueprint("api", __name__)
 listings = ListingRepository()
+chrono_tasks = ChronoTaskRepository()
 spider_jobs = SpiderJobRunner()
 
 
@@ -105,6 +108,178 @@ def me():
     return jsonify({"user": json_safe(public_user(g.current_user))})
 
 
+def _required_string(payload, field):
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        return None, f"{field} must be a non-empty string"
+
+    return value.strip(), None
+
+
+CHRONO_STRING_FIELDS = (
+    "spider",
+    "city",
+    "university_campus",
+    "room_type",
+    "furnishing",
+)
+
+CHRONO_NUMERIC_FIELDS = (
+    "min_budget",
+    "max_budget",
+    "min_lease_length",
+    "max_distance_from_campus",
+)
+
+CHRONO_RESPONSE_FIELDS = (
+    "user",
+    "spider",
+    "city",
+    "university_campus",
+    "min_budget",
+    "max_budget",
+    "move_in_date",
+    "min_lease_length",
+    "max_distance_from_campus",
+    "room_type",
+    "furnishing",
+    "pet_friendly",
+    "updated_at",
+)
+
+REMOVED_CHRONO_FIELDS = (
+    "time_between_scrap",
+    "time_between_scrap_minutes",
+    "minimum_match_score",
+)
+
+
+def _optional_number(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if isinstance(value, bool):
+        return None, f"{field} must be a number"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None, f"{field} must be a number"
+
+    if number < 0:
+        return None, f"{field} must be greater than or equal to 0"
+
+    if number.is_integer():
+        return int(number), None
+
+    return number, None
+
+
+def _query_number(field):
+    if field not in request.args:
+        return None, None
+
+    return _optional_number(request.args, field)
+
+
+def _optional_bool(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if isinstance(value, bool):
+        return value, None
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1", "yes"):
+            return True, None
+        if normalized in ("false", "0", "no"):
+            return False, None
+
+    return None, f"{field} must be a boolean"
+
+
+def _optional_date(payload, field):
+    value = payload.get(field)
+    if value is None or value == "":
+        return None, None
+
+    if not isinstance(value, str):
+        return None, f"{field} must be a date string in YYYY-MM-DD format"
+
+    normalized = value.strip()
+    try:
+        date.fromisoformat(normalized)
+    except ValueError:
+        return None, f"{field} must be a date string in YYYY-MM-DD format"
+
+    return normalized, None
+
+
+def _chrono_task_response(task):
+    response = {field: task.get(field) for field in CHRONO_RESPONSE_FIELDS}
+    if "_id" in task:
+        response["_id"] = task["_id"]
+    if "created_at" in task:
+        response["created_at"] = task["created_at"]
+    return response
+
+
+def _chrono_task_payload():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return None, "request body must be a JSON object"
+
+    task = {}
+    value, error = _required_string(payload, "user")
+    if error:
+        return None, error
+    task["user"] = value
+
+    for field in CHRONO_STRING_FIELDS:
+        value = payload.get(field)
+        if value is None or value == "":
+            task[field] = None
+        else:
+            if not isinstance(value, str):
+                return None, f"{field} must be a string"
+            task[field] = value.strip()
+
+    for field in CHRONO_NUMERIC_FIELDS:
+        value, error = _optional_number(payload, field)
+        if error:
+            return None, error
+        task[field] = value
+
+    if (
+        task.get("min_budget") is not None
+        and task.get("max_budget") is not None
+        and task["min_budget"] > task["max_budget"]
+    ):
+        return None, "min_budget must be less than or equal to max_budget"
+
+    move_in_date, error = _optional_date(payload, "move_in_date")
+    if error:
+        return None, error
+    task["move_in_date"] = move_in_date
+
+    pet_friendly, error = _optional_bool(payload, "pet_friendly")
+    if error:
+        return None, error
+    task["pet_friendly"] = pet_friendly
+
+    now = datetime.now(timezone.utc)
+    task["created_at"] = now
+    task["updated_at"] = now
+
+    for field in REMOVED_CHRONO_FIELDS:
+        task.pop(field, None)
+
+    return task, None
+
+
 @api.post("/spiders/run")
 #@jwt_required()
 def run_spiders():
@@ -134,6 +309,120 @@ def run_spiders():
     return jsonify({"job": job}), 202
 
 
+@api.post("/chrono/tasks")
+def create_chrono_task():
+    task, error = _chrono_task_payload()
+    if error:
+        return jsonify({"error": error}), 400
+
+    try:
+        created_task = chrono_tasks.create(task)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"data": json_safe(_chrono_task_response(created_task))}), 201
+
+
+@api.get("/chrono/tasks")
+def get_chrono_tasks():
+    mongo_filter = {}
+
+    user = request.args.get("user")
+    if user:
+        mongo_filter["user"] = user.strip()
+
+    spider = request.args.get("spider")
+    if spider:
+        mongo_filter["spider"] = spider.strip()
+
+    city = request.args.get("city")
+    if city:
+        mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
+
+    for field in CHRONO_STRING_FIELDS:
+        value = request.args.get(field)
+        if value:
+            mongo_filter[field] = {"$regex": value.strip(), "$options": "i"}
+
+    for field in CHRONO_NUMERIC_FIELDS:
+        value, error = _query_number(field)
+        if error:
+            return jsonify({"error": error}), 400
+        if value is not None:
+            mongo_filter[field] = value
+
+    move_in_date = request.args.get("move_in_date")
+    if move_in_date:
+        mongo_filter["move_in_date"] = move_in_date.strip()
+
+    pet_friendly = request.args.get("pet_friendly")
+    if pet_friendly:
+        value, error = _optional_bool({"pet_friendly": pet_friendly}, "pet_friendly")
+        if error:
+            return jsonify({"error": error}), 400
+        mongo_filter["pet_friendly"] = value
+
+    limit = request.args.get("limit", default=50, type=int)
+    skip = request.args.get("skip", default=0, type=int)
+    limit = max(1, min(limit, 500))
+
+    try:
+        documents, total = chrono_tasks.find(mongo_filter, limit=limit, skip=skip)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    documents = [_chrono_task_response(document) for document in documents]
+
+    return jsonify({
+        "count": total,
+        "returned": len(documents),
+        "data": json_safe(documents),
+    })
+
+
+@api.get("/chrono/tasks/user/<path:user>")
+def get_chrono_task_by_user(user):
+    user = user.strip()
+    if not user:
+        return jsonify({"error": "user must be a non-empty string"}), 400
+
+    try:
+        task = chrono_tasks.get_by_user(user)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if task is None:
+        return jsonify({"error": "task not found"}), 404
+
+    return jsonify({"data": json_safe(_chrono_task_response(task))})
+
+
+@api.get("/chrono/tasks/<task_id>")
+def get_chrono_task(task_id):
+    try:
+        task = chrono_tasks.get(task_id)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if task is None:
+        return jsonify({"error": "task not found"}), 404
+
+    return jsonify({"data": json_safe(_chrono_task_response(task))})
+
+
+@api.delete("/chrono/tasks/<task_id>")
+def delete_chrono_task(task_id):
+    try:
+        deleted_count = chrono_tasks.delete(task_id)
+    except (RuntimeError, PyMongoError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    if deleted_count == 0:
+        return jsonify({"error": "task not found"}), 404
+
+    return "", 204
+
+
 @api.get("/data")
 def get_data():
     # This is the global filter that will be sent to the database.
@@ -149,10 +438,23 @@ def get_data():
         mongo_filter["city"] = {"$regex": city.strip(), "$options": "i"}
 
     # SOURCE FILTER
-    # If the URL contains ?source=kamernet, only return listings from that website.
+    # ?source=kamernet              -> only that website
+    # ?source=funda,kamernet,...    -> any of those websites (sorted together)
+    # Accepting several sources at once lets the API sort across all of them in a
+    # single request instead of the frontend merging per-source responses.
     source = request.args.get("source")
     if source:
-        mongo_filter["source"] = source.strip().lower()
+        # Split "funda,kamernet" into a clean list, one source per item.
+        source_list = []
+        for part in source.split(","):
+            part = part.strip().lower()
+            if part != "":
+                source_list.append(part)
+
+        if len(source_list) == 1:
+            mongo_filter["source"] = source_list[0]
+        elif len(source_list) > 1:
+            mongo_filter["source"] = {"$in": source_list}
 
     # PRICE FILTER
     # If the URL contains ?min_price=500 and/or ?max_price=1200
@@ -175,6 +477,147 @@ def get_data():
             {"price": string_price_filter},
         ]
 
+    # ROOMS FILTER
+    # ?min_rooms=1&max_rooms=1  -> exactly 1 room
+    # ?min_rooms=2&max_rooms=2  -> exactly 2 rooms
+    # ?min_rooms=3              -> 3 or more rooms (no upper limit)
+    # rooms is stored as a number on some sources and a numeric string on
+    # others, so we convert it to a number before comparing.
+    min_rooms = request.args.get("min_rooms", type=int)
+    max_rooms = request.args.get("max_rooms", type=int)
+    if min_rooms is not None or max_rooms is not None:
+        # Turn the stored rooms value into a number. If it is missing or is not
+        # a number, this becomes null and the listing is left out.
+        rooms_as_number = {
+            "$convert": {
+                "input": "$rooms",
+                "to": "double",
+                "onError": None,
+                "onNull": None,
+            }
+        }
+
+        rooms_conditions = [{"$ne": [rooms_as_number, None]}]
+        if min_rooms is not None:
+            rooms_conditions.append({"$gte": [rooms_as_number, min_rooms]})
+        if max_rooms is not None:
+            rooms_conditions.append({"$lte": [rooms_as_number, max_rooms]})
+
+        mongo_filter["$expr"] = {"$and": rooms_conditions}
+
+    # TAG PRESENCE FILTER ("has" the tag or not)
+    # ?has=energy_label,furnished  -> only listings that HAVE those fields
+    # filled in. Each tag shown on a card maps to one or more database fields.
+    # A field counts as "present" when it exists and is not null or empty.
+    # Some tags can come from more than one field (for example the home type is
+    # stored as either "Type apartment" or "Kind of house"), so any of the
+    # listed fields being present is enough for that tag.
+    has_field_map = {
+        "furnished": ["furnished", "interior"],
+        "housemates": ["housemates"],
+        "plot_size": ["plot_size"],
+        "bathrooms": ["features.Number of bath rooms"],
+    }
+
+    has = request.args.get("has")
+    if has:
+        # Each selected tag becomes one condition. All selected tags must be
+        # present, so we collect them in a list and join them with $and.
+        has_conditions = []
+        for part in has.split(","):
+            key = part.strip().lower()
+            if key == "":
+                continue
+            if key not in has_field_map:
+                continue
+
+            fields = has_field_map[key]
+            if len(fields) == 1:
+                # Only one field to check for this tag.
+                has_conditions.append({
+                    fields[0]: {"$exists": True, "$nin": [None, ""]}
+                })
+            else:
+                # The tag can come from several fields, so any one of them
+                # being present is enough.
+                or_list = []
+                for field in fields:
+                    or_list.append({field: {"$exists": True, "$nin": [None, ""]}})
+                has_conditions.append({"$or": or_list})
+
+        if has_conditions:
+            mongo_filter["$and"] = has_conditions
+
+    # ENERGY LABEL FILTER
+    # ?energy_label=A  -> listings whose energy label is in that class.
+    # Labels are stored inconsistently (A, A+, A+++, A3, ...), so we match on
+    # the first letter. That groups all the A-class labels together, all the
+    # B-class together, and so on. Only single letters A to G are allowed.
+    energy_label = request.args.get("energy_label")
+    if energy_label:
+        letter = energy_label.strip().upper()
+        allowed_letters = ["A", "B", "C", "D", "E", "F", "G"]
+        if letter in allowed_letters:
+            mongo_filter["energy_label"] = {
+                "$regex": "^" + letter,
+                "$options": "i",
+            }
+
+    created_after = request.args.get("created_after")
+
+    if created_after:
+        try:
+            created_after_date = datetime.fromisoformat(
+                created_after.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return jsonify({"error": "created_after must be ISO datetime"}), 400
+
+        mongo_filter["created_at"] = {
+            "$gte": created_after_date
+        }
+        print("=" * 50)
+        print("created_after:", created_after)
+        print("created_after_date:", created_after_date)
+        print("created_after_date tzinfo:", created_after_date.tzinfo)
+        print("mongo_filter:", mongo_filter)
+        print("=" * 50)
+
+    # SORTING
+    # ?sort=price&order=asc   -> cheapest first
+    # ?sort=price&order=desc  -> most expensive first
+    # Sorting is done by MongoDB itself (not in PHP/JS). Only a whitelist of
+    # fields is allowed so a user can't sort on arbitrary/unindexed fields.
+    # The fields we allow sorting on. We keep this as a short list so a user
+    # cannot sort on some random field.
+    sortable_fields = ["price", "created_at"]
+    sort = None
+    sort_field = request.args.get("sort")
+    if sort_field:
+        sort_field = sort_field.strip()
+        if sort_field not in sortable_fields:
+            return jsonify({
+                "error": "sort must be one of: price, created_at"
+            }), 400
+
+        order = request.args.get("order", default="asc").strip().lower()
+        if order not in ("asc", "desc"):
+            return jsonify({"error": "order must be 'asc' or 'desc'"}), 400
+
+        # Pick the sort direction with a simple if/else.
+        if order == "asc":
+            direction = ASCENDING
+        else:
+            direction = DESCENDING
+
+        sort = [(sort_field, direction)]
+
+        # Listings without a price are meaningless in a price-sorted view, and
+        # Mongo orders null below any number so they would clump at the very top
+        # on an ascending sort. Exclude them whenever we sort by price.
+        if sort_field == "price":
+            mongo_filter["price"] = {"$ne": None}
+
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
     # ?limit=50 = "show 50 listings"
@@ -184,6 +627,7 @@ def get_data():
     skip = request.args.get("skip", default=0, type=int)
     limit = max(1, min(limit, 500))
 
+
     # FETCH FROM DATABASE
     # If something goes wrong, return an error message.
     try:
@@ -192,7 +636,12 @@ def get_data():
             limit=limit,
             skip=skip,
             numeric_string_price=numeric_string_price,
+            sort=sort,
         )
+        print("Found documents:", total)
+
+        if documents:
+            print("First document created_at:", documents[0].get("created_at"))
     except (RuntimeError, PyMongoError) as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -276,3 +725,12 @@ def delete_old_listings():
         "cutoff_date": cutoff_date.isoformat(),
         "deleted": delete_result.deleted_count
     })
+
+@api.get("/spiders/jobs/<job_id>")
+def get_spider_job(job_id):
+    job = spider_jobs.get(job_id)
+
+    if job is None:
+        return jsonify({"error": "job not found"}), 404
+
+    return jsonify({"job": json_safe(job)})

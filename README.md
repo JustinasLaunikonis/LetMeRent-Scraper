@@ -97,6 +97,20 @@ api/serialization.py  MongoDB values converted for JSON responses
 api/config.py         shared Scrapy and Mongo settings
 ```
 
+### Chrono Tasks
+
+`POST /chrono/tasks` accepts a JSON object with the required `user` field and these nullable search preferences:
+
+```text
+spider, city, university_campus, min_budget, max_budget, move_in_date,
+min_lease_length, max_distance_from_campus, room_type, furnishing,
+pet_friendly
+```
+
+`spider` is a comma-separated source string, for example `kamernet,funda`. If the frontend selects "Any source", send all spiders: `kamernet,funda,housinganywhere,huurwoningen,irentalize`. Empty text, select, and number fields may be sent as `null`; `pet_friendly` accepts `true`, `false`, or `null`. `move_in_date` must be `YYYY-MM-DD`; numeric fields must be greater than or equal to `0`.
+
+The removed fields `time_between_scrap`, `time_between_scrap_minutes`, and `minimum_match_score` are not required and are ignored if present. `GET /chrono/tasks/user/{email}` returns the saved task in a `data` object.
+
 ### Auth
 
 The API stores users in the MongoDB `users` collection by default. A user document contains the basic scalable fields:
