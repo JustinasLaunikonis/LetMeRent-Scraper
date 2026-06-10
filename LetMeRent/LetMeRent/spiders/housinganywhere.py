@@ -68,7 +68,11 @@ class HousinganywhereSpider(scrapy.Spider):
             price_label = card.css('[data-test-locator="ListingCard/PriceLabel"]::text').get()
             size = card.css('[data-test-locator="ListingCard/AttributesSize"] span::text').get()
             housemates = card.css('[data-test-locator="ListingCard/AttributesPlaces"] span::text').get()
-            availability = card.css('[data-test-locator="ListingCard/Availability"] span::text').get()
+            # The availability has two parts: a label "Available from " and
+            # the date in a second span (for example "1 September").
+            # parse_detail turns this into the status and the move-in date
+            availability_parts = card.css('[data-test-locator="ListingCard/Availability"] span::text').getall()
+            availability = clean_text(availability_parts)
             href = card.css("::attr(href)").get()
 
             images = card.css('[data-test-locator="ListingCardPhotoGallery/Photo"]::attr(src)').getall()
@@ -197,10 +201,10 @@ class HousinganywhereSpider(scrapy.Spider):
         listing["tenant_age"] = tenant_age
         listing["tenant_gender"] = tenant_gender
 
-        # availability holds the move-in text
-        # status is the standard word so normalise for data storage
-        # ("Available", "Rented", ...)
+        # The card text looks like "Available from 1 September" or "Available now".
+        # read the status from the full text ("Available", "Rented", ...) then remove the label "Available from"
         listing["status"] = normalize_status(listing.get("availability"))
+        listing["availability"] = remove_label(listing.get("availability"), "Available from")
 
         # HousingAnywhere has no energy label, but keep the field (empty)
         listing["energy_label"] = ""
