@@ -1,7 +1,7 @@
 import scrapy
 import re
 
-from LetMeRent.spiders.city_utils import city_title, housinganywhere_city, normalize_status
+from LetMeRent.spiders.city_utils import city_title, housinganywhere_city, normalize_status, normalize_availability
 
 
 def extract_number(text):
@@ -204,7 +204,9 @@ class HousinganywhereSpider(scrapy.Spider):
         # The card text looks like "Available from 1 September" or "Available now".
         # read the status from the full text ("Available", "Rented", ...) then remove the label "Available from"
         listing["status"] = normalize_status(listing.get("availability"))
-        listing["availability"] = remove_label(listing.get("availability"), "Available from")
+        move_in_text = remove_label(listing.get("availability"), "Available from")
+        # Turn the move-in text into the universal format, for example "1 September" -> "2026-09-01".
+        listing["availability"] = normalize_availability(move_in_text)
 
         # HousingAnywhere has no energy label, but keep the field (empty)
         listing["energy_label"] = ""
