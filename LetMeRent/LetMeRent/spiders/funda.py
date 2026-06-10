@@ -219,6 +219,11 @@ class FundaSpider(scrapy.Spider):
         # Read them all into a dictionary, and also collect the chosen rows as tags.
         features = {}
         tags = []
+        # We always remember the status text so we can set the standard status
+        # field below. But "Available" is the normal case, so we do not keep it
+        # in features or as a tag (that would just clutter the card). Every other
+        # status ("Rented", "Under option", "Reserved", ...) is kept as usual.
+        raw_status = ""
         for category in response.css('[data-testid^="category-"]'):
             dt_list = category.css("dt")
             dd_list = category.css("dd")
@@ -230,6 +235,13 @@ class FundaSpider(scrapy.Spider):
 
                 if key == "" or val == "":
                     continue
+
+                # Remember the status text for the status field below.
+                # Skip storing it only when it is "Available"; keep all other states.
+                if key == "Status":
+                    raw_status = val
+                    if val.strip().lower() == "available":
+                        continue
 
                 # Values that start with "€" or a digit are amounts/sizes, so store the number only.
                 # Everything else stays as text.
@@ -250,7 +262,7 @@ class FundaSpider(scrapy.Spider):
         # "Acceptance" is the move-in text (for example "Available immediately" or "Available on 8/1/2026")
         # "Status" is the listing state (for example "Available" or "Under option")
         availability = features.get("Acceptance", "")
-        status = normalize_status(features.get("Status", ""))
+        status = normalize_status(raw_status)
 
         # Agent details and the main photo
         agent_person = response.css("span.wrap-break-word::text").get("").strip()
