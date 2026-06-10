@@ -1,6 +1,45 @@
 import scrapy
+import re
 
-from LetMeRent.spiders.city_utils import city_title, housinganywhere_city
+from LetMeRent.spiders.city_utils import city_title, housinganywhere_city, normalize_status
+
+
+def extract_number(text):
+    # Keep only the digits from the text, so "€850" becomes 850
+    # Returns None when there is no number at all
+    if text is None:
+        return None
+
+    digits_only = re.sub(r"[^\d]", "", text)
+
+    if digits_only == "":
+        return None
+
+    return int(digits_only)
+
+
+def remove_label(text, label):
+    # Remove label from the text, so a value like
+    # "Tenant type: Students only" becomes just "Students only"
+    if text is None:
+        return None
+
+    cleaned = text.strip()
+    if cleaned.startswith(label):
+        cleaned = cleaned[len(label):]
+
+    return cleaned.strip()
+
+
+def clean_text(parts):
+    # Join a list of text pieces into one clean string
+    pieces = []
+    for part in parts:
+        piece = part.strip()
+        if piece != "":
+            pieces.append(piece)
+
+    return " ".join(pieces)
 
 
 class HousinganywhereSpider(scrapy.Spider):
@@ -18,6 +57,9 @@ class HousinganywhereSpider(scrapy.Spider):
         yield scrapy.Request(url=url, callback=self.parse)
 
     def parse(self, response):
+        # Step 1: read the search results page
+        # Each card gives us basics, but useful tags (like "No deposit").
+        # Follow the link to the detail page, where parse_detail() collects the rest
         cards = response.css('[data-test-locator="ListingCard/Anchor"]')
 
         for card in cards:
@@ -31,18 +73,136 @@ class HousinganywhereSpider(scrapy.Spider):
 
             images = card.css('[data-test-locator="ListingCardPhotoGallery/Photo"]::attr(src)').getall()
 
-            # fallback: some images only have srcset
+            # some images are only given as a "srcset" instead of "src".
             srcset_images = card.css('[data-test-locator="ListingCardPhotoGallery/Photo"]::attr(srcset)').getall()
 
-            yield {
+            if not href:
+                continue
+
+            detail_url = response.urljoin(href)
+
+            # Save the basics we already have.
+            # We pass this to parse_detail(), which adds the extra fields
+            # Prices and sizes are stored as plain numbers (no "€" or "m²").
+            basics = {
                 "title": title,
                 "city": self.city_name,
-                "price": price,
+                "price": extract_number(price),
                 "price_label": price_label,
-                "living_area": size,
-                "housemates": housemates,
+                "living_area": extract_number(size),
+                "housemates": extract_number(housemates),
                 "availability": availability,
-                "url": response.urljoin(href),
+                "url": detail_url,
                 "images": images,
                 "srcset_images": srcset_images,
             }
+
+            # Open the listings own page
+            yield scrapy.Request(
+                url=detail_url,
+                callback=self.parse_detail,
+                cb_kwargs={"basics": basics},
+            )
+
+    def parse_detail(self, response, basics):
+        # Step 2: read the listings detail page and add the extra fields
+        # "listing" is the same as built in parse() but we keep adding to it
+        listing = basics
+
+        # "No deposit", "Furnished", "Private room in house", "5 housemates (mixed)", "Floor: 2".
+        # We collect them all into a "tags" list so the frontend can show them
+        tags = []
+        deposit_policy = None
+        property_kind = None
+        furnished = None
+        floor = None
+
+        highlight_nodes = response.css('[data-test-locator^="HighlightsTags/"]')
+        for node in highlight_nodes:
+            label = clean_text(node.css("::text").getall())
+            if label == "":
+                continue
+
+            tags.append(label)
+
+            # Work out which kind of tag this is from its locator name
+            # for example "HighlightsTags/DepositPolicy".
+            locator = node.attrib.get("data-test-locator", "")
+            if locator.endswith("/DepositPolicy"):
+                deposit_policy = label
+            elif locator.endswith("/Kind"):
+                property_kind = label
+            elif locator.endswith("/Furnished"):
+                furnished = label
+            elif locator.endswith("/FloorNumber"):
+                # The chip reads like "Floor: 2", we only want the number.
+                floor = extract_number(label)
+
+        street = response.css('[data-test-locator="Listing/ListingInfo/street"]::text').get()
+        if street is not None:
+            street = street.strip()
+
+        # Price on the detail page
+        # If the detail page shows a price, use it instead of the card price.
+        detail_price = response.css('[data-test-locator="Listing/ListingInfo/Price"]::text').get()
+        detail_price_number = extract_number(detail_price)
+        if detail_price_number is not None:
+            listing["price"] = detail_price_number
+
+        description = clean_text(
+            response.css('[data-test-locator="Listing/ListingDescription"]::text').getall()
+        )
+
+        # The word "Description" is the section heading, drop it if it is there.
+        if description.startswith("Description"):
+            description = description[len("Description"):].strip()
+
+        # Facilities and amenities (a list of names)
+        facilities = []
+        facility_texts = response.css(
+            '[data-test-locator="ListingDetailedInfosSection/TwoColumnsContainer/facilities"] ::text'
+        ).getall()
+        for facility_text in facility_texts:
+            name = facility_text.strip()
+            if name != "":
+                facilities.append(name)
+
+        # Tenant rules and preferences
+        # "Tenant type: Students only" drop the label so only the value is left
+        tenant_type_raw = clean_text(
+            response.css('[data-test-locator="Preferences/TenantType"] ::text').getall()
+        )
+        tenant_type = remove_label(tenant_type_raw, "Tenant type:")
+
+        tenant_age_raw = clean_text(
+            response.css('[data-test-locator="Preferences/TenantAge"] ::text').getall()
+        )
+        tenant_age = remove_label(tenant_age_raw, "Age:")
+
+        tenant_gender_raw = clean_text(
+            response.css('[data-test-locator="Preferences/TenantGender"] ::text').getall()
+        )
+        tenant_gender = remove_label(tenant_gender_raw, "Gender:")
+
+        # Add all the extra detail page fields to the item
+        listing["street"] = street
+        listing["tags"] = tags
+        listing["deposit_policy"] = deposit_policy
+        listing["property_type"] = property_kind
+        listing["furnished"] = furnished
+        listing["floor"] = floor
+        listing["description"] = description
+        listing["facilities"] = facilities
+        listing["tenant_type"] = tenant_type
+        listing["tenant_age"] = tenant_age
+        listing["tenant_gender"] = tenant_gender
+
+        # availability holds the move-in text
+        # status is the standard word so normalise for data storage
+        # ("Available", "Rented", ...)
+        listing["status"] = normalize_status(listing.get("availability"))
+
+        # HousingAnywhere has no energy label, but keep the field (empty)
+        listing["energy_label"] = ""
+
+        yield listing
