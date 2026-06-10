@@ -2,7 +2,7 @@ import scrapy
 import re
 from urllib.parse import urlparse, parse_qs, unquote
 
-from LetMeRent.spiders.city_utils import city_slug
+from LetMeRent.spiders.city_utils import city_slug, normalize_availability
 
 
 def full_size_image(image_url):
@@ -105,6 +105,9 @@ class KamernetSpider(scrapy.Spider):
                     # Drop the word "From" and keep the date.
                     availability = line.removeprefix("From").strip()
                     break
+
+            # Turn the date into the universal format, for example "1 sep 2026" -> "2026-09-01"
+            availability = normalize_availability(availability)
 
             # Price is a number, store it as a plain number (no "€")
             raw_price = card.css("span.MuiTypography-h5::text").get("")
