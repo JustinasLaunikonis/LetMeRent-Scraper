@@ -1,7 +1,7 @@
 import scrapy
 import re
 
-from LetMeRent.spiders.city_utils import city_title, normalize_status
+from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability
 
 
 def extract_number(text):
@@ -261,7 +261,7 @@ class IRentalizeSpider(scrapy.Spider):
             "toilets": feature_info["toilets"],
             "floors": feature_info["floors"],
 
-            "availability": self.extract_availability(response),
+            "availability": normalize_availability(self.extract_availability(response)),
             "status": status,
             "price": price,
             "starting_price": starting_price,
