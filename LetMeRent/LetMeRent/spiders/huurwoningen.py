@@ -181,9 +181,6 @@ class HuurwoningenSpider(scrapy.Spider):
             if value != "" and value not in tags:
                 tags.append(value)
 
-        # Note: energy label is not added as a tag here. It is already saved
-        # in the "energy_label" field, so adding it to tags would just repeat it.
-
         # Balcony and roof terrace only make sense as tags when present
         if balcony == "Present":
             tags.append("Balcony")
