@@ -78,6 +78,180 @@ cd LetMeRent
 scrapy crawl huurwoningen -a city=Amsterdam
 ```
 
+## Scraped fields per spider
+
+Each spider below has its own table listing **every field it stores**. Fields
+are saved exactly as the spider yields them, after which the MongoDB pipeline
+adds a few common fields to every document (see below).
+
+### How to read the tables
+
+- A **+** in the first column means the field is **shared**: every spider
+  stores it under the same name with the same meaning. These eleven shared
+  fields are `url`, `title`, `city`, `price`, `living_area`, `availability`,
+  `status`, `energy_label`, `description`, `images`, and `tags`.
+- Fields **without** a + are specific to that one spider (or only used by a few
+  sites), so they keep their own name.
+
+### Common fields added to every document
+
+These are not scraped from the websites. The MongoDB pipeline
+(`LetMeRent/pipelines.py`) adds them to every listing, no matter which spider
+produced it.
+
+| Field        | Type      | Meaning                                                  |
+|--------------|-----------|----------------------------------------------------------|
+| `source`     | text      | Which spider scraped it (the spider name, e.g. `funda`)  |
+| `scraped_at` | timestamp | When the listing was last scraped (updated every run)    |
+| `created_at` | timestamp | When the listing was first stored                        |
+
+### funda
+
+| + | Field           | Type      | Meaning                                              |
+|---|-----------------|-----------|------------------------------------------------------|
+| + | `url`           | text      | Listing detail page URL                              |
+| + | `title`         | text      | Listing title (the street address)                   |
+|   | `address`       | text      | Street address                                       |
+|   | `street`        | text      | Street name                                          |
+| + | `city`          | text      | City name (Title Case)                               |
+|   | `postal_city`   | text      | Postal code + city line, e.g. `7811 AB Emmen`        |
+|   | `neighbourhood` | text      | Neighbourhood name                                   |
+|   | `latitude`      | number    | Map latitude                                         |
+|   | `longitude`     | number    | Map longitude                                        |
+| + | `price`         | number    | Monthly rent (no `€`)                                |
+| + | `living_area`   | number    | Living area in m² (no `m²`)                          |
+|   | `plot_size`     | number    | Plot/lot area in m²                                  |
+|   | `rooms`         | number    | Number of bedrooms                                   |
+|   | `bedrooms`      | number    | Number of bedrooms                                   |
+| + | `energy_label`  | text      | Energy grade (e.g. `A`), or `""`                     |
+| + | `status`        | text      | Standard status word (`Available`, `Rented`, …)      |
+| + | `availability`  | text      | Move-in text (e.g. `Available immediately`)          |
+| + | `description`   | text      | Listing description                                  |
+|   | `agent_person`  | text      | Contact person name                                  |
+|   | `agent`         | text      | Estate agent name                                    |
+|   | `agent_url`     | text      | Estate agent page URL                                |
+|   | `phone`         | text      | Contact phone number                                 |
+| + | `images`        | list      | Photo URLs                                           |
+|   | `features`      | dict      | All feature rows from the page (label → value)       |
+| + | `tags`          | list      | Short descriptive chips                              |
+
+### housinganywhere
+
+| + | Field            | Type   | Meaning                                              |
+|---|------------------|--------|------------------------------------------------------|
+| + | `url`            | text   | Listing detail page URL                              |
+| + | `title`          | text   | Listing title                                        |
+|   | `street`         | text   | Street address                                       |
+| + | `city`           | text   | City name (Title Case)                               |
+| + | `price`          | number | Monthly rent (no `€`)                                |
+|   | `price_label`    | text   | Price period label, e.g. `per month`                 |
+| + | `living_area`    | number | Living area in m²                                    |
+|   | `housemates`     | number | Number of housemates                                 |
+|   | `floor`          | number | Floor number                                         |
+| + | `availability`   | text   | Move-in text                                         |
+| + | `status`         | text   | Standard status word (derived from availability)     |
+| + | `energy_label`   | text   | Always `""` (site has no energy label)               |
+| + | `description`    | text   | Listing description                                  |
+|   | `deposit_policy` | text   | Deposit policy chip, e.g. `No deposit`               |
+|   | `property_type`  | text   | Kind of property, e.g. `Private room in house`       |
+|   | `furnished`      | text   | Furnishing chip                                      |
+|   | `facilities`     | list   | Facility / amenity names                             |
+|   | `tenant_type`    | text   | Allowed tenant type, e.g. `Students only`            |
+|   | `tenant_age`     | text   | Preferred tenant age range                           |
+|   | `tenant_gender`  | text   | Preferred tenant gender                              |
+| + | `images`         | list   | Photo URLs (`src`)                                   |
+|   | `srcset_images`  | list   | Extra photo URLs taken from the image `srcset`       |
+| + | `tags`           | list   | Short descriptive chips                              |
+
+### huurwoningen
+
+| + | Field               | Type   | Meaning                                           |
+|---|---------------------|--------|---------------------------------------------------|
+| + | `url`               | text   | Listing detail page URL                           |
+| + | `title`             | text   | Listing title                                     |
+|   | `address`           | text   | Street address                                    |
+| + | `city`              | text   | City name (Title Case)                            |
+| + | `price`             | number | Monthly rent (no `€`)                             |
+| + | `living_area`       | number | Living/surface area in m²                         |
+|   | `rooms`             | number | Number of rooms                                   |
+|   | `bathrooms`         | number | Number of bathrooms                               |
+|   | `floors`            | number | Number of floors                                  |
+|   | `construction_year` | number | Year built                                        |
+|   | `interior`          | text   | Furnishing / interior condition                   |
+|   | `property_type`     | text   | Dwelling type                                     |
+|   | `property_types`    | text   | Property type                                     |
+|   | `construction_type` | text   | Construction type                                 |
+|   | `balcony`           | text   | `Present` (or the site's value)                   |
+|   | `roof_terrace`      | text   | `Present` (or the site's value)                   |
+| + | `energy_label`      | text   | Energy grade, or `""`                             |
+| + | `status`            | text   | Standard status word                              |
+|   | `offered_since`     | text   | Date the listing was offered                      |
+| + | `availability`      | text   | Move-in text (e.g. `Immediately`)                 |
+|   | `upkeep`            | text   | Upkeep / state of maintenance                     |
+| + | `description`       | text   | Listing description                               |
+| + | `images`            | list   | Photo URLs (card + detail page)                   |
+| + | `tags`              | list   | Short descriptive chips                           |
+
+### irentalize
+
+| + | Field            | Type   | Meaning                                              |
+|---|------------------|--------|------------------------------------------------------|
+| + | `url`            | text   | Property detail page URL                             |
+| + | `title`          | text   | Listing title                                        |
+| + | `city`           | text   | City name                                            |
+|   | `city_filter`    | text   | City chosen in the site's filter                     |
+|   | `listing_page`   | number | Result page number it was found on                   |
+|   | `property_type`  | text   | Property type (from the page heading)                |
+| + | `price`          | number | Monthly rent (starting price, else base rent)        |
+|   | `starting_price` | number | "Starting from" price                                |
+|   | `base_rent`      | number | Base rent                                            |
+|   | `service_fee`    | number | Service fee                                          |
+|   | `utilities`      | number | Utilities amount                                     |
+| + | `living_area`    | number | Living area in m²                                    |
+|   | `rooms`          | number | Number of rooms                                      |
+|   | `bathrooms`      | number | Number of bathrooms                                  |
+|   | `kitchens`       | number | Number of kitchens                                   |
+|   | `toilets`        | number | Number of toilets                                    |
+|   | `floors`         | number | Number of floors                                     |
+|   | `furnished`      | text   | `Furnished` or `""`                                  |
+| + | `energy_label`   | text   | Energy grade, or `""`                                |
+| + | `status`         | text   | Standard status word                                 |
+| + | `availability`   | text   | Always `""` (site shows status, not a move-in date)  |
+| + | `description`    | text   | Listing description                                  |
+|   | `landlord_name`  | text   | Landlord / author name                               |
+| + | `images`         | list   | Photo URLs (logo removed)                            |
+| + | `tags`           | list   | Short descriptive chips                              |
+
+### kamernet
+
+| + | Field              | Type   | Meaning                                            |
+|---|--------------------|--------|----------------------------------------------------|
+| + | `url`              | text   | Listing detail page URL                            |
+| + | `title`            | text   | Listing title (the street)                         |
+|   | `address`          | text   | Street address                                     |
+|   | `street`           | text   | Street name                                        |
+| + | `city`             | text   | City name                                          |
+| + | `price`            | number | Monthly rent (no `€`)                              |
+|   | `price_label`      | text   | Price period label, e.g. `/month incl. utilities`  |
+| + | `living_area`      | number | Living area in m²                                  |
+|   | `furnished`        | text   | Furnishing text                                    |
+|   | `property_type`    | text   | Property type                                      |
+| + | `availability`     | text   | Move-in date (e.g. `1 July`)                       |
+| + | `status`           | text   | Always `Available` (site lists rentable rooms)     |
+| + | `energy_label`     | text   | Energy grade, or `""`                              |
+| + | `description`      | text   | Listing description                                |
+|   | `amenities`        | list   | "What you'll get" amenities                        |
+|   | `utilities`        | text   | `Incl. utilities` or `Excl. utilities`             |
+|   | `deposit`          | number | Deposit amount                                     |
+|   | `additional_costs` | number | Extra monthly costs                                |
+|   | `rental_period`    | text   | Rental period text                                 |
+|   | `ideal_tenant`     | dict   | Landlord's ideal-tenant rows (label → value)       |
+|   | `landlord_name`    | text   | Landlord name                                      |
+|   | `landlord_type`    | text   | Landlord type / status                             |
+|   | `posted`           | text   | When the listing was posted                        |
+| + | `images`           | list   | Photo URLs                                         |
+| + | `tags`             | list   | Short descriptive chips                            |
+
 ## Flask API
 
 Start the API from the repository root:
