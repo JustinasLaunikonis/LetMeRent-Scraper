@@ -1,7 +1,7 @@
 import scrapy
 import re
 
-from LetMeRent.spiders.city_utils import city_title, normalize_status
+from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability
 
 
 def extract_number(text):
@@ -261,7 +261,7 @@ class IRentalizeSpider(scrapy.Spider):
             "toilets": feature_info["toilets"],
             "floors": feature_info["floors"],
 
-            "availability": "",
+            "availability": normalize_availability(self.extract_availability(response)),
             "status": status,
             "price": price,
             "starting_price": starting_price,
@@ -275,6 +275,30 @@ class IRentalizeSpider(scrapy.Spider):
             "description": description,
             "landlord_name": landlord,
         }
+
+    def extract_availability(self, response):
+        # iRentalize shows the move-in info in a "dynamic field" whose text
+        # starts with the word "Available", for example "Available from
+        # June 1, 2026" or "Available immediately". We look through those fields
+        # and keep just the move-in text (a status word never goes here).
+        #
+        # The description can also contain the word "available", but those
+        # sentences start with other words (like "Only student room
+        # available..."), so we only accept text that begins with "Available".
+        field_texts = response.css(".jet-listing-dynamic-field__content::text").getall()
+        for raw_text in field_texts:
+            text = raw_text.strip()
+
+            # "Available from June 1, 2026" -> keep just the date "June 1, 2026"
+            if text.startswith("Available from"):
+                date_text = text.replace("Available from", "", 1).strip()
+                return date_text
+
+            # "Available immediately" -> store the short phrase "Immediately"
+            if text.startswith("Available immediately"):
+                return "Immediately"
+
+        return ""
 
     def extract_description(self, response):
         description_path = (
