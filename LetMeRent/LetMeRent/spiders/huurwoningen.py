@@ -1,7 +1,7 @@
 import re
 import scrapy
 
-from LetMeRent.spiders.city_utils import city_slug, city_title, normalize_status
+from LetMeRent.spiders.city_utils import city_slug, city_title, normalize_status, normalize_availability
 
 
 def extract_number(text):
@@ -110,6 +110,14 @@ class HuurwoningenSpider(scrapy.Spider):
             yield response.follow(next_page, callback=self.parse)
 
     def parse_detail(self, response, **kwargs):
+        # Some listings do not show a price on the search card (for example "price transparency" listings).
+        # In that case the price is still on the detail page, so read it from the summary box as a fallback.
+        price = kwargs.get("price")
+        if price is None:
+            raw_price = response.css(".listing-detail-summary__price-main::text").get("")
+            price = extract_number(raw_price)
+            kwargs["price"] = price
+
         # description text is built by stripping each piece and dropping the
         # empty ones, then joining what is left with single spaces.
         description_parts = response.css(".listing-detail-description__truncated::text").getall()
@@ -170,7 +178,9 @@ class HuurwoningenSpider(scrapy.Spider):
         status = normalize_status(raw_status)
         offered_since = labelled_features.get("Offered since", "")
         # availability is the move-in text. example: "Immediately".
-        availability = labelled_features.get("Available", "")
+        # Turn it into the universal format, for example "From 01-07-2026" -> "2026-07-01".
+        raw_availability = labelled_features.get("Available", "")
+        availability = normalize_availability(raw_availability)
         upkeep = labelled_features.get("Upkeep", "")
 
         tags = []
