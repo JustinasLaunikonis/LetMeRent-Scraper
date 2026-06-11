@@ -2,7 +2,7 @@ import re
 import json
 import scrapy
 
-from LetMeRent.spiders.city_utils import city_slug, normalize_status
+from LetMeRent.spiders.city_utils import city_slug, normalize_status, normalize_availability
 
 LISTING_SELECTOR = '[data-testid="listingDetailsAddress"]'
 
@@ -219,6 +219,11 @@ class FundaSpider(scrapy.Spider):
         # Read them all into a dictionary, and also collect the chosen rows as tags.
         features = {}
         tags = []
+        # We always remember the status text so we can set the standard status
+        # field below. But "Available" is the normal case, so we do not keep it
+        # in features or as a tag (that would just clutter the card). Every other
+        # status ("Rented", "Under option", "Reserved", ...) is kept as usual.
+        raw_status = ""
         for category in response.css('[data-testid^="category-"]'):
             dt_list = category.css("dt")
             dd_list = category.css("dd")
@@ -230,6 +235,13 @@ class FundaSpider(scrapy.Spider):
 
                 if key == "" or val == "":
                     continue
+
+                # Remember the status text for the status field below.
+                # Skip storing it only when it is "Available"; keep all other states.
+                if key == "Status":
+                    raw_status = val
+                    if val.strip().lower() == "available":
+                        continue
 
                 # Values that start with "€" or a digit are amounts/sizes, so store the number only.
                 # Everything else stays as text.
@@ -249,8 +261,8 @@ class FundaSpider(scrapy.Spider):
         # Common status / availability fields, stored the same way as the other spiders.
         # "Acceptance" is the move-in text (for example "Available immediately" or "Available on 8/1/2026")
         # "Status" is the listing state (for example "Available" or "Under option")
-        availability = features.get("Acceptance", "")
-        status = normalize_status(features.get("Status", ""))
+        availability = normalize_availability(features.get("Acceptance", ""))
+        status = normalize_status(raw_status)
 
         # Agent details and the main photo
         agent_person = response.css("span.wrap-break-word::text").get("").strip()
@@ -262,10 +274,29 @@ class FundaSpider(scrapy.Spider):
         if phone_href:
             phone = phone_href.replace("tel:", "")
 
-        image = response.css("#media .col-span-2 img::attr(src)").get("")
+        # Build the list of photo URLs from the listing data we already read.
+        # This works even when the page layout changes, sometimes Funda shows a gallery, sometimes just one photo
         images = []
-        if image:
-            images = [image]
+        media = listing.get("media") or {}
+        photos = media.get("photos") or {}
+        base_url = photos.get("mediaBaseUrl") or ""
+        photo_items = photos.get("items") or []
+        if base_url:
+            for photo in photo_items:
+                photo_id = photo.get("id")
+                if photo_id:
+                    image_url = base_url.replace("{id}", photo_id)
+                    images.append(image_url)
+
+        # Fallbacks in case the data had no photos
+        if not images:
+            og_image = response.css('meta[property="og:image"]::attr(content)').get("")
+            if og_image:
+                images = [og_image]
+        if not images:
+            image = response.css("#media .col-span-2 img::attr(src)").get("")
+            if image:
+                images = [image]
 
         yield {
             "url": response.url,
