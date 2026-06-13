@@ -12,6 +12,8 @@ from pymongo import ASCENDING, MongoClient
 from pymongo.errors import PyMongoError
 from scrapy.exceptions import NotConfigured
 
+from LetMeRent.spiders.city_utils import normalize_availability
+
 
 DEPRECATED_FIELDS = (
     "available_from",
@@ -25,8 +27,21 @@ DEPRECATED_FIELDS = (
 )
 
 
-class LetmerentPipeline:
+class NormalizePipeline:
+    # This pipeline runs for every scraped item, before it is stored.
+    # It makes sure shared fields are always saved in the universal format,
+    # no matter which spider produced the item. Each spider already tries to
+    # normalise its own values, but this is a safety net so the database can
+    # never keep a raw value like "Available on 7/1/2026" or "From 01-09-2026".
     def process_item(self, item, spider):
+        adapter = ItemAdapter(item)
+
+        # Turn the move-in date into the universal "YYYY-MM-DD" / "Immediately"
+        # form. Running this again on an already-clean value leaves it the same.
+        if "availability" in adapter:
+            raw_value = adapter.get("availability")
+            adapter["availability"] = normalize_availability(raw_value)
+
         return item
 
 
