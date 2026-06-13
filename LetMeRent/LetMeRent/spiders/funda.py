@@ -62,6 +62,10 @@ class FundaSpider(scrapy.Spider):
         for address_link in listings:
             href = address_link.attrib.get("href", "")
             if href:
+                # Skip "koophuur" listings (buy-and-rent). We only want normal
+                # rentals, so we do not follow any link that has /koophuur/ in it.
+                if "/koophuur/" in href:
+                    continue
                 # Open the listing page to read its details.
                 yield response.follow(href, callback=self.parse_detail)
 
