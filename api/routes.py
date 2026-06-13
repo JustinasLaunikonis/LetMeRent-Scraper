@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+import re
 
 from flask import Blueprint, g, jsonify, request
 from pymongo import ASCENDING, DESCENDING
@@ -576,6 +577,29 @@ def get_data():
                 "$regex": "^" + letter,
                 "$options": "i",
             }
+
+    # ?available_by=2026-09-01 -> only listings you can move into on or before that date.
+    available_by = request.args.get("available_by")
+    if available_by:
+        chosen_date = available_by.strip()
+        # Only accept a proper "YYYY-MM-DD" value so we never build a broken filter.
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", chosen_date):
+            available_now = {"availability": "Immediately"}
+            available_dated = {
+                "availability": {
+                    "$regex": r"^\d{4}-\d{2}-\d{2}$",
+                    "$lte": chosen_date,
+                }
+            }
+            move_in_match = {"$or": [available_now, available_dated]}
+
+            # Add this condition without overwriting any $and the filters above
+            # may have already set (for example the "has" tag filter).
+            if "$and" in mongo_filter:
+                mongo_filter["$and"].append(move_in_match)
+            else:
+                mongo_filter["$and"] = [move_in_match]
+
 
     created_after = request.args.get("created_after")
 
