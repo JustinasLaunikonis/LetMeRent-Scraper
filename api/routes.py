@@ -563,6 +563,22 @@ def get_data():
             for condition in has_conditions:
                 add_and_condition(condition)
 
+    # GARAGE / PARKING FILTER
+    # Real listings always have a living area (square meters), but garages and parking spots do not.
+    # So "no living area" is a simple way to show only garages and parking spots.
+    # ?no_living_area=1 -> only listings that have no living_area value.
+    no_living_area = request.args.get("no_living_area")
+    if no_living_area == "1":
+        # A listing counts as "no living area" when the field is missing, or it
+        # is empty/null, or it is zero.
+        missing_area = {
+            "$or": [
+                {"living_area": {"$exists": False}},
+                {"living_area": {"$in": [None, "", 0, "0"]}},
+            ]
+        }
+        add_and_condition(missing_area)
+
     # ENERGY LABEL FILTER
     # ?energy_label=A  -> listings whose energy label is in that class.
     # Labels are stored inconsistently (A, A+, A+++, A3, ...), so we match on
