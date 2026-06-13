@@ -3,6 +3,13 @@ from datetime import date, datetime, timedelta, timezone
 from flask import Blueprint, g, jsonify, request
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
+from api.mongo import (
+    ChronoTaskRepository,
+    ListingRepository,
+    UserRepository
+)
+
+users = UserRepository()
 
 from api.auth import (
     authenticate_user,
@@ -431,6 +438,12 @@ def get_data():
     # Example: /data?city=emmen&max_price=1000&limit=50
     mongo_filter = {}
 
+    def add_and_condition(condition):
+        if "$and" not in mongo_filter:
+            mongo_filter["$and"] = []
+
+        mongo_filter["$and"].append(condition)
+
     # CITY FILTER
     # If the URL is ?city=something, only return listings in that city.
     city = request.args.get("city")
@@ -546,7 +559,8 @@ def get_data():
                 has_conditions.append({"$or": or_list})
 
         if has_conditions:
-            mongo_filter["$and"] = has_conditions
+            for condition in has_conditions:
+                add_and_condition(condition)
 
     # ENERGY LABEL FILTER
     # ?energy_label=A  -> listings whose energy label is in that class.
@@ -583,6 +597,32 @@ def get_data():
         print("mongo_filter:", mongo_filter)
         print("=" * 50)
 
+    furnishing = request.args.get("furnishing")
+    if furnishing:
+        add_and_condition({
+            "$or": [
+                {"furnishing": {"$regex": furnishing.strip(), "$options": "i"}},
+                {"interior": {"$regex": furnishing.strip(), "$options": "i"}},
+                {"furnished": {"$regex": furnishing.strip(), "$options": "i"}},
+            ]
+        })
+
+    room_type = request.args.get("room_type")
+    if room_type:
+        add_and_condition({
+            "$or": [
+                {"room_type": {"$regex": room_type.strip(), "$options": "i"}},
+                {"type": {"$regex": room_type.strip(), "$options": "i"}},
+                {"Type apartment": {"$regex": room_type.strip(), "$options": "i"}},
+                {"Kind of house": {"$regex": room_type.strip(), "$options": "i"}},
+            ]
+        })
+
+    pet_friendly = request.args.get("pet_friendly")
+    if pet_friendly is not None:
+        value = pet_friendly.lower() in ("true", "1", "yes")
+        add_and_condition({"pet_friendly": value})
+
     # SORTING
     # ?sort=price&order=asc   -> cheapest first
     # ?sort=price&order=desc  -> most expensive first
@@ -616,7 +656,7 @@ def get_data():
         # Mongo orders null below any number so they would clump at the very top
         # on an ascending sort. Exclude them whenever we sort by price.
         if sort_field == "price":
-            mongo_filter["price"] = {"$ne": None}
+            add_and_condition({"price": {"$ne": None}})
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
@@ -734,3 +774,14 @@ def get_spider_job(job_id):
         return jsonify({"error": "job not found"}), 404
 
     return jsonify({"job": json_safe(job)})
+
+@api.get("/users/by-username/<username>")
+def get_user_by_username(username):
+    user = users.find_by_username(username.strip())
+
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    return jsonify({
+        "user": json_safe(public_user(user))
+    })
