@@ -1,5 +1,6 @@
 import scrapy
 import re
+import json
 from urllib.parse import urlparse, parse_qs, unquote
 
 from LetMeRent.spiders.city_utils import city_slug, normalize_availability
@@ -26,6 +27,40 @@ def full_size_image(image_url):
         return unquote(original)
 
     return image_url
+
+
+def detail_page_images(response):
+    # The detail page loads its photo gallery with JavaScript, so the HTML we
+    # download only contains a low-quality thumbnail. Luckily Kamernet is a
+    # Next.js site, which means the full data is also written into a JSON blob
+    # inside a <script id="__NEXT_DATA__"> tag. That JSON has a list of photo
+    # ids ("imageList"), and each id maps to a full-quality photo at
+    # https://resources.kamernet.nl/image/<id>.
+    # This function reads that list and returns the full-quality photo URLs.
+    # Returns an empty list when the data is missing or cannot be read.
+    raw_json = response.css("script#__NEXT_DATA__::text").get()
+    if not raw_json:
+        return []
+
+    # Turn the text into a Python object. If it is broken, give up safely.
+    try:
+        data = json.loads(raw_json)
+    except ValueError:
+        return []
+
+    # Walk down the JSON step by step. At each step, stop if the key is missing.
+    page_props = data.get("props", {}).get("pageProps", {})
+    target = page_props.get("targetPageProps", {})
+    listing_details = target.get("listingDetails", {})
+    image_ids = listing_details.get("imageList", [])
+
+    # Build the full-quality URL for every photo id we found.
+    image_urls = []
+    for image_id in image_ids:
+        if image_id:
+            image_urls.append("https://resources.kamernet.nl/image/" + image_id)
+
+    return image_urls
 
 
 def extract_number(text):
@@ -253,6 +288,13 @@ class KamernetSpider(scrapy.Spider):
         listing = {}
         for key in kwargs:
             listing[key] = kwargs[key]
+
+        # The card only gave us one low-quality thumbnail. The detail page has
+        # the full set of high-quality photos, so use those when we can find
+        # them. If we cannot, keep the card image we already have.
+        detail_images = detail_page_images(response)
+        if detail_images:
+            listing["images"] = detail_images
 
         # Kamernet only shows rooms that are for rent, so the status is always
         # "Available". availability (in kwargs) holds the move-in date.
