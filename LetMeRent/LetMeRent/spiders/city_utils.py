@@ -109,6 +109,11 @@ def normalize_availability(text=None):
     if "immediat" in lowered or "now" in lowered or "direct" in lowered or "asap" in lowered:
         return "Immediately"
 
+    # "In consultation", "Available in consultation" (Funda) 
+    # Different sites word it differently, so store one standard phrase for all of them.
+    if "consultation" in lowered or "consult" in lowered or "overleg" in lowered:
+        return "In consultation"
+
     # Look for a 4-digit year anywhere in the text (it may be missing).
     year_match = re.search(r"(\d{4})", cleaned)
 
