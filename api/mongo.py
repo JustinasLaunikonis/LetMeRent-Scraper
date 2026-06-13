@@ -168,6 +168,13 @@ class UserRepository:
         finally:
             client.close()
 
+    def find_by_username(self, username: str):
+        client = self._client()
+        try:
+            return self._collection(client).find_one({"username": username})
+        finally:
+            client.close()
+
 
 class ChronoTaskRepository:
     def __init__(self):
