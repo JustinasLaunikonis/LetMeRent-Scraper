@@ -156,6 +156,9 @@ class FundaSpider(scrapy.Spider):
         return {}
 
     def parse_detail(self, response):
+        if "/koophuur/" in response.url:
+            return
+
         listing = self._nuxt_listing(response)
 
         price_obj = listing.get("price") or {}

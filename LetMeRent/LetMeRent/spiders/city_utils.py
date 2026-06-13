@@ -152,5 +152,9 @@ def normalize_availability(text=None):
         year = int(dash.group(3))
         return build_date(year, month, day)
 
+    only_letters = re.sub(r"[^a-z]", "", lowered)
+    if only_letters == "available" or only_letters == "availablefrom":
+        return "Immediately"
+
     # Nothing matched a date, so keep the original text.
     return cleaned
