@@ -1,5 +1,6 @@
 import scrapy
 import re
+import json
 
 from LetMeRent.spiders.city_utils import city_title, housinganywhere_city, normalize_status, normalize_availability
 
@@ -29,6 +30,45 @@ def remove_label(text, label):
         cleaned = cleaned[len(label):]
 
     return cleaned.strip()
+
+
+def to_number(text):
+    # Turn a coordinate like "52.7912574" into a float
+    if text is None:
+        return None
+
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_coordinates(response):
+    # HousingAnywhere puts the exact map location in a JSON-LD script on the detail page
+    # read thelatitude and longitude from there so the listing can show on the map
+    json_blocks = response.css('script[type="application/ld+json"]::text').getall()
+
+    for block in json_blocks:
+        try:
+            data = json.loads(block)
+        except ValueError:
+            continue
+
+        # only need the "geo" part with the coordinates
+        if not isinstance(data, dict):
+            continue
+
+        geo = data.get("geo")
+        if not isinstance(geo, dict):
+            continue
+
+        latitude = to_number(geo.get("latitude"))
+        longitude = to_number(geo.get("longitude"))
+        if latitude is not None and longitude is not None:
+            return latitude, longitude
+
+    # No coordinates found on this page, return none
+    return None, None
 
 
 def clean_text(parts):
@@ -146,6 +186,9 @@ class HousinganywhereSpider(scrapy.Spider):
         if street is not None:
             street = street.strip()
 
+        # The map location (latitude/longitude) comes from the JSON-LD on the page.
+        latitude, longitude = get_coordinates(response)
+
         # Price on the detail page
         # If the detail page shows a price, use it instead of the card price.
         detail_price = response.css('[data-test-locator="Listing/ListingInfo/Price"]::text').get()
@@ -190,6 +233,8 @@ class HousinganywhereSpider(scrapy.Spider):
 
         # Add all the extra detail page fields to the item
         listing["street"] = street
+        listing["latitude"] = latitude
+        listing["longitude"] = longitude
         listing["tags"] = tags
         listing["deposit_policy"] = deposit_policy
         listing["property_type"] = property_kind
