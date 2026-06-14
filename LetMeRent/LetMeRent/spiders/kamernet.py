@@ -63,6 +63,40 @@ def detail_page_images(response):
     return image_urls
 
 
+def to_number(value):
+    # Turn a coordinate like 52.78352 (or the text "52.78352") into a float.
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def detail_page_coordinates(response):
+    # Kamernet draws a map on the detail page, and the location for it is written
+    # into the same __NEXT_DATA__ JSON blob we already read for the photos
+
+    raw_json = response.css("script#__NEXT_DATA__::text").get()
+    if not raw_json:
+        return None, None
+
+    try:
+        data = json.loads(raw_json)
+    except ValueError:
+        return None, None
+
+    page_props = data.get("props", {}).get("pageProps", {})
+    target = page_props.get("targetPageProps", {})
+    listing_details = target.get("listingDetails", {})
+
+    latitude = to_number(listing_details.get("postalCodeLat"))
+    longitude = to_number(listing_details.get("postalCodeLong"))
+
+    return latitude, longitude
+
+
 def extract_number(text):
     # Keep only the digits from the text, so "€ 375" becomes 375
     # Returns None when there is no number at all
@@ -295,6 +329,10 @@ class KamernetSpider(scrapy.Spider):
         detail_images = detail_page_images(response)
         if detail_images:
             listing["images"] = detail_images
+
+        latitude, longitude = detail_page_coordinates(response)
+        listing["latitude"] = latitude
+        listing["longitude"] = longitude
 
         # Kamernet only shows rooms that are for rent, so the status is always
         # "Available". availability (in kwargs) holds the move-in date.
