@@ -66,7 +66,13 @@ def pdok_coordinates(query, place_type):
 
 def postal_code_coordinates(postal_code):
     # Turn a Dutch postal code (like "7815 KT") into map coordinates.
-    return pdok_coordinates(postal_code, "postcode")
+
+    # remove the space first ("7815 KT" -> "7815KT")
+    if postal_code is None:
+        return None, None
+
+    postal_code_no_spaces = postal_code.replace(" ", "")
+    return pdok_coordinates(postal_code_no_spaces, "postcode")
 
 
 def address_coordinates(address):
