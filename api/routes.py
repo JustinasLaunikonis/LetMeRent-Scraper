@@ -445,6 +445,12 @@ def get_data():
 
         mongo_filter["$and"].append(condition)
 
+    # ALWAYS HIDE LISTINGS WITHOUT A PRICE
+    has_price = {
+        "price": {"$exists": True, "$nin": [None, "", 0, "0"]}
+    }
+    add_and_condition(has_price)
+
     # CITY FILTER
     # If the URL is ?city=something, only return listings in that city.
     city = request.args.get("city")
@@ -692,11 +698,9 @@ def get_data():
 
         sort = [(sort_field, direction)]
 
-        # Listings without a price are meaningless in a price-sorted view, and
-        # Mongo orders null below any number so they would clump at the very top
-        # on an ascending sort. Exclude them whenever we sort by price.
-        if sort_field == "price":
-            add_and_condition({"price": {"$ne": None}})
+        # Note: listings without a price are already excluded for every request
+        # (see the "ALWAYS HIDE LISTINGS WITHOUT A PRICE" filter near the top),
+        # so a price sort never has to worry about null prices clumping together.
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
