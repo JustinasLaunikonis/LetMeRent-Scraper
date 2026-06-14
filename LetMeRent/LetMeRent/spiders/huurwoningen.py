@@ -1,7 +1,60 @@
 import re
+import requests
 import scrapy
 
 from LetMeRent.spiders.city_utils import city_slug, city_title, normalize_status, normalize_availability
+
+
+def postal_code_coordinates(postal_code):
+    # Huurwoningen only gives us a postal code (like "7815 KT"), not coordinates
+    # The map needs latitude and longitude to place a pin, so here we look those
+    # up from the postal code using PDOK.
+
+    # Returns (latitude, longitude), or (None, None) when nothing is found.
+    # Whenit returns (None, None) the listing simply has no map pin
+    if postal_code is None or postal_code == "":
+        return None, None
+
+    url = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
+    # fq=type:postcode keeps only postal-code matches
+    # fl=centroide_ll asks PDOK to return just the centre point of that postal code.
+    params = {
+        "q": postal_code,
+        "fq": "type:postcode",
+        "fl": "centroide_ll",
+        "rows": 1,
+    }
+
+    # The network call can fail (no internet, PDOK down)
+    # "no coordinates found" instead of crashing the whole spider
+    try:
+        response = requests.get(url, params=params, timeout=10)
+    except Exception:
+        return None, None
+
+    if response.status_code != 200:
+        return None, None
+
+    data = response.json()
+
+    response_part = data.get("response", {})
+    docs = response_part.get("docs", [])
+    if len(docs) == 0:
+        return None, None
+
+    # PDOK gives the point as text like "POINT(6.9054 52.7794)", which is
+    # "POINT(longitude latitude)". We strip the "POINT(" and ")" and split on the
+    # space to get the two numbers.
+    point = docs[0].get("centroide_ll", "")
+    point = point.replace("POINT(", "")
+    point = point.replace(")", "")
+    parts = point.split(" ")
+    if len(parts) != 2:
+        return None, None
+
+    longitude = float(parts[0])
+    latitude = float(parts[1])
+    return latitude, longitude
 
 
 def extract_number(text):
@@ -147,6 +200,10 @@ class HuurwoningenSpider(scrapy.Spider):
         postal_code = raw_location.split("(")[0]
         postal_code = postal_code.strip()
 
+        # Turn the postal code into map coordinates so this listing can get a pin
+        # on the map, the same way funda listings do with their latitude/longitude.
+        latitude, longitude = postal_code_coordinates(postal_code)
+
         # Furnishing / interior condition (may be empty on some listings)
         interior = response.css("[aria-describedby='tooltip-listing-features-interior']::text").get("")
         interior = interior.strip()
@@ -210,6 +267,8 @@ class HuurwoningenSpider(scrapy.Spider):
 
         listing["city"] = self.city_name
         listing["postal_code"] = postal_code
+        listing["latitude"] = latitude
+        listing["longitude"] = longitude
         listing["interior"] = interior
         listing["description"] = description
         listing["images"] = images
