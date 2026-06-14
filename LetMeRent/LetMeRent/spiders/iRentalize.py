@@ -1,7 +1,7 @@
 import scrapy
 import re
 
-from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability
+from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability, address_coordinates
 
 
 def extract_number(text):
@@ -243,13 +243,27 @@ class IRentalizeSpider(scrapy.Spider):
         else:
             landlord = None
 
+        # The title heading holds the street address (street + house number).
+        # iRentalize does not give coordinates, so build a full address from
+        # the title and the city and ask PDOK to turn it into latitude/longitude.
+        city = self.extract_city(headings, all_text)
+        full_address = ""
+        if title:
+            full_address = title
+            if city:
+                full_address = full_address + ", " + city
+
+        latitude, longitude = address_coordinates(full_address)
+
         yield {
             "city_filter": response.meta.get("city_filter"),
             "listing_page": response.meta.get("listing_page"),
             "url": response.url,
             "title": title,
             "property_type": self.extract_property_type(headings),
-            "city": self.extract_city(headings, all_text),
+            "city": city,
+            "latitude": latitude,
+            "longitude": longitude,
 
             # Number only, without m²
             "living_area": self.extract_size(all_text),
