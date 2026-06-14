@@ -75,9 +75,10 @@ class IRentalizeSpider(scrapy.Spider):
                 html = await page.content()
                 selector = scrapy.Selector(text=html)
 
-                property_links = selector.css(
-                    "a[href*='/properties/']::attr(href), "
-                    "a[href*='/property/']::attr(href)"
+                property_links = selector.xpath(
+                    "//a[contains(@href, '/properties/') or contains(@href, '/property/')]"
+                    "[not(ancestor::*[contains(@class, 'swiper')])]"
+                    "/@href"
                 ).getall()
 
                 for href in property_links:
@@ -239,6 +240,18 @@ class IRentalizeSpider(scrapy.Spider):
         # iRentalize does not give coordinates, so build a full address from
         # the title and the city and ask PDOK to turn it into latitude/longitude.
         city = self.extract_city(headings, all_text)
+
+        # only keep this listing if its city matches the city we searched for
+        # The Featured section at the bottom sometimes shows listings from other cities,
+        # so if we know both cities and they are different, skip it
+        city_filter = response.meta.get("city_filter")
+        if city is not None and city_filter is not None:
+            if city.strip().lower() != city_filter.strip().lower():
+                self.logger.info(
+                    f"SKIPPING {response.url} - city '{city}' does not match filter '{city_filter}'"
+                )
+                return
+
         full_address = ""
         if title:
             full_address = title
