@@ -140,6 +140,13 @@ class HuurwoningenSpider(scrapy.Spider):
             if image not in images:
                 images.append(image)
 
+        # Postal code, for example "7815 KT (Emmermeer)".
+        # We only want the postal code, so we cut everything from the first "(" onwards.
+        raw_location = response.css(".listing-detail-summary__location::text").get("")
+        raw_location = raw_location.strip()
+        postal_code = raw_location.split("(")[0]
+        postal_code = postal_code.strip()
+
         # Furnishing / interior condition (may be empty on some listings)
         interior = response.css("[aria-describedby='tooltip-listing-features-interior']::text").get("")
         interior = interior.strip()
@@ -202,6 +209,7 @@ class HuurwoningenSpider(scrapy.Spider):
             listing[key] = kwargs[key]
 
         listing["city"] = self.city_name
+        listing["postal_code"] = postal_code
         listing["interior"] = interior
         listing["description"] = description
         listing["images"] = images
