@@ -1,5 +1,6 @@
 import scrapy
 import re
+from urllib.parse import quote
 
 from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability, address_coordinates
 
@@ -21,18 +22,21 @@ def extract_number(text):
 class IRentalizeSpider(scrapy.Spider):
     name = "irentalize"
     allowed_domains = ["irentalize.nl"]
-    start_urls = ["https://irentalize.nl/properties/"]
+    base_url = "https://irentalize.nl/properties/"
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.city = city_title(city)
 
+    def build_start_url(self):
+        city = quote(self.city, safe="")
+        return f"{self.base_url}?jsf=jet-engine:filterproperty&meta=city:{city}"
+
     def start_requests(self):
-        # The site loads its listings with JavaScript, so we use Playwright to open a real browser page.
-        # We keep the page open (with "playwright_include_page") so we can click the city filter and the
-        # pagination buttons in parse_city.
+        # The site loads its listings with JavaScript, use Playwright to open a real browser page
+        # keep the page open (with "playwright_include_page") so we can click the pagination buttons in parse_city.
         yield scrapy.Request(
-            url=self.start_urls[0],
+            url=self.build_start_url(),
             meta={
                 "playwright": True,
                 "playwright_include_page": True,
@@ -62,18 +66,6 @@ class IRentalizeSpider(scrapy.Spider):
                 await page.get_by_role("button", name="Accept").click(timeout=3000)
             except Exception:
                 pass
-
-            # Pick our city in the filter dropdown and tell the page it changed
-            city_select = page.locator("select.jet-select__control[name='city']")
-            await city_select.wait_for(timeout=10000)
-            await city_select.select_option(value=city)
-            await city_select.dispatch_event("change")
-
-            await page.wait_for_timeout(2000)
-
-            # Press the "apply filters" button so the list reloads for our city
-            await page.locator("button.apply-filters__button").click()
-            await page.wait_for_timeout(5000)
 
             # Go through the result pages one by one until there are no more
             while True:
