@@ -166,7 +166,9 @@ class KamernetSpider(scrapy.Spider):
 
             furnished = ""
             if len(details) > 1:
-                furnished = details[1].strip()
+                # Values like "furnished"/"unfurnished" come through lower-case,
+                # so capitalise them ("unfurnished" -> "Unfurnished").
+                furnished = details[1].strip().capitalize()
 
             property_type = ""
             if len(details) > 2:
