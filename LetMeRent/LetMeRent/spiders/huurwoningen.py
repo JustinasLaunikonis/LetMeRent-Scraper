@@ -141,6 +141,11 @@ class HuurwoningenSpider(scrapy.Spider):
             price = extract_number(raw_price)
             kwargs["price"] = price
 
+        rooms = kwargs.get("rooms")
+        if rooms is None:
+            rooms = extract_number(feature_value(response, "number_of_rooms"))
+            kwargs["rooms"] = rooms
+
         # description text is built by stripping each piece and dropping the
         # empty ones, then joining what is left with single spaces.
         description_parts = response.css(".listing-detail-description__truncated::text").getall()
@@ -203,11 +208,28 @@ class HuurwoningenSpider(scrapy.Spider):
         construction_type = feature_value(response, "construction_type")
         balcony = feature_value(response, "balcony")
         roof_terrace = feature_value(response, "roof_terrace")
+        situation = feature_value(response, "situations")
+        garden = feature_value(response, "garden")
+        storage = feature_value(response, "storage")
+        kitchen = feature_value(response, "kitchen")
+        bathroom = feature_value(response, "bathroom")
+        toilet = feature_value(response, "toilet")
+        gender_of_housemates = feature_value(response, "preferred_gender")
+        smoking_allowed = feature_value(response, "smoking_allowed")
+        pets_allowed = feature_value(response, "pets_allowed")
+        target_audience = feature_value(response, "required_statuses")
+
+        parking = response.css(".page__details--parking .listing-features__main-description::text").get("")
+        parking = parking.strip()
+        garage = response.css(".page__details--garage .listing-features__main-description::text").get("")
+        garage = garage.strip()
 
         # Numeric features
         construction_year = extract_number(feature_value(response, "construction_period"))
         bathrooms = extract_number(feature_value(response, "number_of_bathrooms"))
         floors = extract_number(feature_value(response, "number_of_floors"))
+        # Number of housemates, from the "Shared facilities" box on room listings.
+        housemates = extract_number(feature_value(response, "number_of_roommates"))
 
         # The "transfer" rows (Status, Available, etc.)
         feature_terms = response.css(".listing-features__term")
@@ -233,19 +255,43 @@ class HuurwoningenSpider(scrapy.Spider):
         upkeep = labelled_features.get("Upkeep", "")
         rental_period = labelled_features.get("Rental period", "")
 
+        deposit = extract_number(labelled_features.get("Deposit", ""))
+        # Contract type, for example "Unlimited period".
+        contract_type = labelled_features.get("Contract type", "")
+
+        price_per_m2 = extract_number(labelled_features.get("Price per m²", ""))
+
         tags = []
 
         # Descriptive features that are useful as tags
-        descriptive = [property_type, property_types, interior, construction_type]
+        descriptive = [property_type, property_types, interior, construction_type, situation]
         for value in descriptive:
             if value != "" and value not in tags:
                 tags.append(value)
 
-        # Balcony and roof terrace only make sense as tags when present
+        # Outdoor space / parking only make sense as tags when actually present
         if balcony == "Present":
             tags.append("Balcony")
         if roof_terrace == "Present":
             tags.append("Roof terrace")
+        if garden == "Present":
+            tags.append("Garden")
+        if storage == "Present":
+            tags.append("Storage")
+        if parking == "Yes":
+            tags.append("Parking")
+        if garage == "Yes":
+            tags.append("Garage")
+
+        # Rental conditions that renters care about
+        if pets_allowed == "Yes":
+            tags.append("Pets allowed")
+        if smoking_allowed == "Yes":
+            tags.append("Smoking allowed")
+
+        # Target audience, for example "Working, Student"
+        if target_audience != "" and target_audience not in tags:
+            tags.append(target_audience)
 
         # Some listings show an "Advance payment utilities" section in the price box,
         # with a row for each utility (Water, Electricity, Gas). 
@@ -280,13 +326,29 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["construction_year"] = construction_year
         listing["bathrooms"] = bathrooms
         listing["floors"] = floors
+        listing["housemates"] = housemates
+        listing["gender_of_housemates"] = gender_of_housemates
+        listing["kitchen"] = kitchen
+        listing["bathroom"] = bathroom
+        listing["toilet"] = toilet
+        listing["situation"] = situation
         listing["balcony"] = balcony
         listing["roof_terrace"] = roof_terrace
+        listing["garden"] = garden
+        listing["storage"] = storage
+        listing["parking"] = parking
+        listing["garage"] = garage
         listing["status"] = status
         listing["offered_since"] = offered_since
         listing["availability"] = availability
         listing["upkeep"] = upkeep
         listing["rental_period"] = rental_period
+        listing["contract_type"] = contract_type
+        listing["deposit"] = deposit
+        listing["price_per_m2"] = price_per_m2
+        listing["smoking_allowed"] = smoking_allowed
+        listing["pets_allowed"] = pets_allowed
+        listing["target_audience"] = target_audience
         listing["utilities"] = utilities
         listing["tags"] = tags
 
