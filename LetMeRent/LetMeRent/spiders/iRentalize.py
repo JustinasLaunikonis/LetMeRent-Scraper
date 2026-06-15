@@ -323,6 +323,10 @@ class IRentalizeSpider(scrapy.Spider):
 
             # Number only, without "room" or "rooms"
             "rooms": rooms,
+
+            # iRentalize lists shared student houses, so assume that number of rooms is also the number of housemates
+            # -1 because the person renting the room is not their own housemate
+            "housemates": rooms - 1,
             "bathrooms": feature_info["bathrooms"],
             "kitchens": feature_info["kitchens"],
             "toilets": feature_info["toilets"],
