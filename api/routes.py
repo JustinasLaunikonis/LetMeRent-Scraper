@@ -552,17 +552,15 @@ def get_data():
                 continue
 
             if key == "furnished":
-                furnished_present = {
-                    "furnished": {"$exists": True, "$nin": [None, ""]}
+                # Only count listings that are actually "Furnished"
+                furnished_match = {
+                    "furnished": {"$regex": "^furnished$", "$options": "i"}
                 }
-                interior_present = {
-                    "interior": {
-                        "$exists": True,
-                        "$nin": [None, "", "Shell", "Upholstered"],
-                    }
+                interior_match = {
+                    "interior": {"$regex": "^furnished$", "$options": "i"}
                 }
                 has_conditions.append({
-                    "$or": [furnished_present, interior_present]
+                    "$or": [furnished_match, interior_match]
                 })
                 continue
 
