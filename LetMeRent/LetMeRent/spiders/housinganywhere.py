@@ -71,6 +71,36 @@ def get_coordinates(response):
     return None, None
 
 
+def full_quality_image(image_url):
+    # https://housinganywhere.imgix.net/unit_type/1654245/<id>.jpg?ixlib=...&w=120&h=90&q=20
+    if not image_url:
+        return ""
+
+    if "imgix" not in image_url:
+        return image_url
+
+    # Everything before "?" is the original image path.
+    return image_url.split("?", 1)[0]
+
+
+def detail_page_images(response):
+    # The detail page shows the full photo gallery: a big image slider plus a row of preview tiles.
+    slider_srcs = response.css(
+        '[data-test-locator^="Listing/ImageSlider/"] img::attr(src)'
+    ).getall()
+    tile_srcs = response.css(
+        '[data-test-locator^="Photo button"] img::attr(src)'
+    ).getall()
+
+    images = []
+    for raw in slider_srcs + tile_srcs:
+        image = full_quality_image(raw)
+        if image and image not in images:
+            images.append(image)
+
+    return images
+
+
 def clean_text(parts):
     # Join a list of text pieces into one clean string
     pieces = []
@@ -230,6 +260,10 @@ class HousinganywhereSpider(scrapy.Spider):
             response.css('[data-test-locator="Preferences/TenantGender"] ::text').getall()
         )
         tenant_gender = remove_label(tenant_gender_raw, "Gender:")
+
+        detail_images = detail_page_images(response)
+        if detail_images:
+            listing["images"] = detail_images
 
         # Add all the extra detail page fields to the item
         listing["street"] = street
