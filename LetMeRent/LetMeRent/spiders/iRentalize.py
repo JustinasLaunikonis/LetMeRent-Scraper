@@ -214,6 +214,17 @@ class IRentalizeSpider(scrapy.Spider):
             "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
             "/@src"
         ).getall()
+
+        # iRentalize lazy-loads its photos
+        # Before a photo is loaded, the site shows a blank placeholder whose "src" is an invisible SVG that starts with "data:image/svg+xml".
+        lazy_images = response.xpath(
+            "//img"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@data-lazy-src"
+        ).getall()
+
         thumbnail_images = response.xpath(
             "//*[contains(@class, 'e-gallery-image')]"
             "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
@@ -222,10 +233,16 @@ class IRentalizeSpider(scrapy.Spider):
             "/@data-thumbnail"
         ).getall()
 
-        raw_images = gallery_images + thumbnail_images
+        raw_images = gallery_images + lazy_images + thumbnail_images
 
         images = []
         for image in raw_images:
+            # Skip the blank lazy-load placeholders
+            if image is None:
+                continue
+            if image.startswith("data:"):
+                continue
+
             big_image = full_size_image(image)
             if big_image not in images:
                 images.append(big_image)
