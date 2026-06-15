@@ -379,6 +379,11 @@ class KamernetSpider(scrapy.Spider):
                     val = val.strip()
                 elif key == "Duration of stay":
                     duration_of_stay = val
+
+                if isinstance(val, str) and "," in val:
+                    parts = [part.strip() for part in val.split(",") if part.strip()]
+                    val = ", ".join(parts[:3])
+
                 ideal_tenant[key] = val
 
         landlord_name = response.css("section.LandlordInfo_root__1KSuS h6.MuiTypography-subtitle1::text").get("").strip()
