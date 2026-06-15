@@ -111,6 +111,14 @@ def extract_number(text):
     return int(digits_only)
 
 
+def remove_word(text, word):
+    cleaned = text.replace(word, "")
+    cleaned = cleaned.replace(word.capitalize(), "")
+    # Turn any double spaces left behind into single spaces.
+    cleaned = " ".join(cleaned.split())
+    return cleaned.strip()
+
+
 class KamernetSpider(scrapy.Spider):
     name = "kamernet"
     allowed_domains = ["kamernet.nl"]
@@ -242,32 +250,87 @@ class KamernetSpider(scrapy.Spider):
         amenities = response.css("section.Details_root__6__Gy .Details_gridItem__ids4p p.MuiTypography-body1::text").getall()
 
         energy_label = ""
+        housemates = None
+        gender_of_housemates = ""
+        kitchen = ""
+        bathroom = ""
+        toilet = ""
+        pets_allowed = ""
+        smoking_allowed = ""
+
+        leftover_amenities = []
+
         for amenity in amenities:
             text = amenity.strip()
+            if text == "":
+                continue
+
+            lower = text.lower()
+
             if text.startswith("Energy label"):
+                # "Energy label C" -> keep just the grade "C"
                 energy_label = text[len("Energy label"):].strip()
 
-        # Rental costs: deposit and any extra monthly costs
+            elif "roommate" in lower:
+                # "6 roommates" tells us the number of housemates.
+                # "Mixed gender roommates" tells us the gender mix instead.
+                number = extract_number(text)
+                if number is not None:
+                    housemates = number
+                else:
+                    # Keep just the first word, for example "Mixed" or "Female".
+                    words = text.split()
+                    if len(words) > 0:
+                        gender_of_housemates = words[0]
+
+            elif "kitchen" in lower:
+                # "Shared kitchen" -> store just "Shared"
+                kitchen = remove_word(text, "kitchen")
+
+            elif "bathroom" in lower:
+                bathroom = remove_word(text, "bathroom")
+
+            elif "toilet" in lower:
+                toilet = remove_word(text, "toilet")
+
+            elif "pets" in lower:
+                if lower.startswith("no"):
+                    pets_allowed = "No"
+                else:
+                    pets_allowed = "Yes"
+
+            elif "smoking" in lower:
+                if lower.startswith("no"):
+                    smoking_allowed = "No"
+                else:
+                    smoking_allowed = "Yes"
+
+            else:
+                leftover_amenities.append(text)
+
+        # Rental costs: deposit and the extra monthly costs
         cost_rows = response.css("section.RentalCosts_root__mUggN .RentalCosts_cardRow__RilZB")
         deposit_raw = ""
-        additional_costs_raw = ""
+        utilities_raw = ""
         for row in cost_rows:
             label = row.css("p::text").get("").strip()
             value = row.css("h6::text").get("").strip()
             if "Deposit" in label:
                 deposit_raw = value
             elif "Additional" in label:
-                additional_costs_raw = value
+                # Kamernet labels this row "Additional costs" and shows something
+                # like "€15 extra", but this amount is basically the monthly
+                # utilities price, so keep it as the utilities amount.
+                utilities_raw = value
 
         # These are money amounts, store them as plain numbers (None if missing)
         deposit = extract_number(deposit_raw)
-        additional_costs = extract_number(additional_costs_raw)
+        utilities_price = extract_number(utilities_raw)
 
-        # Whether utilities are included is shown in the price label, for example "/month incl. utilities".
-        # turn that into a short tag.
-        # The label only mentions utilities when they are included, so if it is not mentioned treat utilities as not included.
         price_label = kwargs.get("price_label", "")
-        if "incl. utilities" in price_label.lower():
+        if utilities_price is not None:
+            utilities = utilities_price
+        elif "incl. utilities" in price_label.lower():
             utilities = "Incl. utilities"
         else:
             utilities = "Excl. utilities"
@@ -282,14 +345,13 @@ class KamernetSpider(scrapy.Spider):
                 rental_period = note
 
         tags = []
-        for amenity in amenities:
-            amenity = amenity.strip()
+        for amenity in leftover_amenities:
             if amenity != "" and amenity not in tags:
                 tags.append(amenity)
 
         furnished = kwargs.get("furnished", "")
         property_type = kwargs.get("property_type", "")
-        extra_tags = [utilities, furnished, property_type, rental_period]
+        extra_tags = [furnished, property_type, rental_period]
         for extra in extra_tags:
             extra = extra.strip()
             if extra != "" and extra not in tags:
@@ -341,9 +403,15 @@ class KamernetSpider(scrapy.Spider):
         listing["amenities"] = amenities
         listing["tags"] = tags
         listing["energy_label"] = energy_label
+        listing["housemates"] = housemates
+        listing["gender_of_housemates"] = gender_of_housemates
+        listing["kitchen"] = kitchen
+        listing["bathroom"] = bathroom
+        listing["toilet"] = toilet
+        listing["pets_allowed"] = pets_allowed
+        listing["smoking_allowed"] = smoking_allowed
         listing["utilities"] = utilities
         listing["deposit"] = deposit
-        listing["additional_costs"] = additional_costs
         listing["rental_period"] = rental_period
         listing["ideal_tenant"] = ideal_tenant
         listing["landlord_name"] = landlord_name
