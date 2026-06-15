@@ -175,6 +175,16 @@ def facility_present(facilities, key, *accepted):
     return value == "yes"
 
 
+def shared_or_private(value):
+    # Turn a facility value into the qualifier the frontend prints in front of
+    # "kitchen"/"bathroom"/"toilet", e.g. "shared" -> "Shared"
+    if value == "shared":
+        return "Shared"
+    if value in ("private", "own", "yes"):
+        return "Private"
+    return ""
+
+
 def collect_facilities(facilities):
     names = []
 
@@ -368,7 +378,7 @@ class HousinganywhereSpider(scrapy.Spider):
             listing["furnished"] = "Furnished"
 
         deposit_policy = (entity.get("depositPolicyLabel") or "").strip()
-        if deposit_policy:
+        if deposit_policy and deposit_policy.lower() != "classical deposit":
             listing["deposit_policy"] = deposit_policy.capitalize()
 
         latitude = to_number(entity.get("latitude"))
@@ -392,7 +402,7 @@ class HousinganywhereSpider(scrapy.Spider):
                 listing["rental_period"] = f"{minimum_stay} months minimum"
 
         if bills_included(entity.get("costs")):
-            listing["utilities"] = "Bills included"
+            listing["utilities"] = "Incl. utilities"
 
         if facility_present(facilities, "garden", "yes", "shared", "private", "own"):
             listing["garden"] = "Present"
@@ -402,6 +412,16 @@ class HousinganywhereSpider(scrapy.Spider):
 
         if facility_present(facilities, "wheelchair_accessible"):
             listing["wheelchair_accessible"] = "Yes"
+
+        kitchen = shared_or_private(facility_value(facilities, "kitchen"))
+        if kitchen:
+            listing["kitchen"] = kitchen
+        bathroom = shared_or_private(facility_value(facilities, "bathroom"))
+        if bathroom:
+            listing["bathroom"] = bathroom
+        toilet = shared_or_private(facility_value(facilities, "toilet"))
+        if toilet:
+            listing["toilet"] = toilet
 
         listing["energy_label"] = facility_value(facilities, "energy_label").upper()
 
@@ -496,7 +516,7 @@ class HousinganywhereSpider(scrapy.Spider):
         if detail_images:
             listing["images"] = detail_images
 
-        if deposit_policy:
+        if deposit_policy and deposit_policy.lower() != "classical deposit":
             listing["deposit_policy"] = deposit_policy
         if property_kind:
             listing["property_type"] = property_kind
