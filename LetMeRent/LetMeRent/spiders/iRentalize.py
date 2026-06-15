@@ -5,6 +5,25 @@ from urllib.parse import quote
 from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability, address_coordinates
 
 
+def full_size_image(url):
+    # iRentalize runs on WordPress
+    # In the photo gallery most images are shown as small thumbnails whose URL ends with a size like
+    # "-300x200" or "-768x512" right before the file extension, for example:
+    #   IMG_6989-1-300x200.jpg
+
+    # WordPress always keeps the original full-resolution file at the same URL
+    # but without that size part:
+    #   IMG_6989-1.jpg
+
+    # So remove the "-WIDTHxHEIGHT" piece to get the high quality image.
+    if url is None:
+        return None
+
+    # Remove a "-123x456" that comes right before a "." (the file extension).
+    big_url = re.sub(r"-\d+x\d+(?=\.)", "", url)
+    return big_url
+
+
 def extract_number(text):
     # Keep only the digits from the text, so "3 Bathroom(s)" becomes 3
     # Returns None when there is no number at all
@@ -193,11 +212,11 @@ class IRentalizeSpider(scrapy.Spider):
             ".e-gallery-image::attr(data-thumbnail)"
         ).getall()
 
-        # Remove duplicate images but keep their original order
         images = []
         for image in raw_images:
-            if image not in images:
-                images.append(image)
+            big_image = full_size_image(image)
+            if big_image not in images:
+                images.append(big_image)
 
         # Remove the first image because it is usually the iRentalize logo
         if images:
