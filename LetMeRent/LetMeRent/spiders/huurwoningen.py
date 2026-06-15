@@ -132,11 +132,16 @@ class HuurwoningenSpider(scrapy.Spider):
         card_images = kwargs.pop("images", [])
         detail_images = response.css(".carrousel__item .picture__image::attr(src)").getall()
 
+        similar_images = response.css(".picture--comparable-listing .picture__image::attr(src)").getall()
+
         images = []
         for image in card_images:
             if image not in images:
                 images.append(image)
         for image in detail_images:
+            # Skip any image that belongs to the "Similar properties" section
+            if image in similar_images:
+                continue
             if image not in images:
                 images.append(image)
 
@@ -208,6 +213,21 @@ class HuurwoningenSpider(scrapy.Spider):
         if roof_terrace == "Present":
             tags.append("Roof terrace")
 
+        # Some listings show an "Advance payment utilities" section in the price box,
+        # with a row for each utility (Water, Electricity, Gas). 
+        # add up all the amounts into one number so it can show as a "utilities" tag
+        utility_prices = response.css(".price-specification__group--utilities .price-specification__description::text").getall()
+        utilities = 0
+        for utility_price in utility_prices:
+            amount = extract_number(utility_price)
+            if amount is not None:
+                utilities = utilities + amount
+
+        # When there were no utility rows, leave it empty instead of 0
+        # so listings without this section do not show a "€0 utilities" tag.
+        if utilities == 0:
+            utilities = ""
+
         listing = {}
         for key in kwargs:
             listing[key] = kwargs[key]
@@ -232,6 +252,7 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["offered_since"] = offered_since
         listing["availability"] = availability
         listing["upkeep"] = upkeep
+        listing["utilities"] = utilities
         listing["tags"] = tags
 
         yield listing
