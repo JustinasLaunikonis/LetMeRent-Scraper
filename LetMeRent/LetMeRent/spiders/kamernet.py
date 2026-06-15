@@ -361,6 +361,7 @@ class KamernetSpider(scrapy.Spider):
         # keep the value only, and turn "Number of tenants: 2" into {"Number of tenants": 2}
         tenant_rows = response.css("section.IdealTenant_root__TS7M8 .IdealTenant_row__U4412")
         ideal_tenant = {}
+        duration_of_stay = ""
         for row in tenant_rows:
             texts = row.css("p::text").getall()
             if len(texts) == 2:
@@ -374,6 +375,8 @@ class KamernetSpider(scrapy.Spider):
                     # Drop the word "years", keep just the range.
                     val = re.sub(r"\s*years$", "", val)
                     val = val.strip()
+                elif key == "Duration of stay":
+                    duration_of_stay = val
                 ideal_tenant[key] = val
 
         landlord_name = response.css("section.LandlordInfo_root__1KSuS h6.MuiTypography-subtitle1::text").get("").strip()
@@ -413,6 +416,7 @@ class KamernetSpider(scrapy.Spider):
         listing["utilities"] = utilities
         listing["deposit"] = deposit
         listing["rental_period"] = rental_period
+        listing["duration_of_stay"] = duration_of_stay
         listing["ideal_tenant"] = ideal_tenant
         listing["landlord_name"] = landlord_name
         listing["landlord_type"] = landlord_type
