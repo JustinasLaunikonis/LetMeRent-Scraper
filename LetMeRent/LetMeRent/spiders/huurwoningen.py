@@ -198,6 +198,7 @@ class HuurwoningenSpider(scrapy.Spider):
         raw_availability = labelled_features.get("Available", "")
         availability = normalize_availability(raw_availability)
         upkeep = labelled_features.get("Upkeep", "")
+        rental_period = labelled_features.get("Rental period", "")
 
         tags = []
 
@@ -252,6 +253,7 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["offered_since"] = offered_since
         listing["availability"] = availability
         listing["upkeep"] = upkeep
+        listing["rental_period"] = rental_period
         listing["utilities"] = utilities
         listing["tags"] = tags
 
