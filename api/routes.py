@@ -551,6 +551,21 @@ def get_data():
             if key not in has_field_map:
                 continue
 
+            if key == "furnished":
+                furnished_present = {
+                    "furnished": {"$exists": True, "$nin": [None, ""]}
+                }
+                interior_present = {
+                    "interior": {
+                        "$exists": True,
+                        "$nin": [None, "", "Shell", "Upholstered"],
+                    }
+                }
+                has_conditions.append({
+                    "$or": [furnished_present, interior_present]
+                })
+                continue
+
             fields = has_field_map[key]
             if len(fields) == 1:
                 # Only one field to check for this tag.
