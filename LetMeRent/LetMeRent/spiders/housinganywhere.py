@@ -243,6 +243,8 @@ class HousinganywhereSpider(scrapy.Spider):
             name = facility_text.strip()
             if name != "":
                 facilities.append(name)
+                if name not in tags:
+                    tags.append(name)
 
         # Tenant rules and preferences
         # "Tenant type: Students only" drop the label so only the value is left
