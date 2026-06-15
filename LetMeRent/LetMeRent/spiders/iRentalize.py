@@ -207,10 +207,22 @@ class IRentalizeSpider(scrapy.Spider):
                 text_pieces.append(piece)
         all_text = " ".join(text_pieces)
 
-        raw_images = response.css(
-            "img::attr(src), "
-            ".e-gallery-image::attr(data-thumbnail)"
+        gallery_images = response.xpath(
+            "//img"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@src"
         ).getall()
+        thumbnail_images = response.xpath(
+            "//*[contains(@class, 'e-gallery-image')]"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@data-thumbnail"
+        ).getall()
+
+        raw_images = gallery_images + thumbnail_images
 
         images = []
         for image in raw_images:
@@ -241,9 +253,9 @@ class IRentalizeSpider(scrapy.Spider):
         if rooms is None:
             rooms = self.extract_rooms(all_text)
 
-        price = starting_price
+        price = base_rent
         if price is None:
-            price = base_rent
+            price = starting_price
 
         if title:
             title = title.strip()
