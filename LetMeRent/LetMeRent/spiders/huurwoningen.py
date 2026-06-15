@@ -228,6 +228,8 @@ class HuurwoningenSpider(scrapy.Spider):
         construction_year = extract_number(feature_value(response, "construction_period"))
         bathrooms = extract_number(feature_value(response, "number_of_bathrooms"))
         floors = extract_number(feature_value(response, "number_of_floors"))
+        # This is the storey number, not how many floors the building has.
+        floor = extract_number(feature_value(response, "story_number"))
         # Number of housemates, from the "Shared facilities" box on room listings.
         housemates = extract_number(feature_value(response, "number_of_roommates"))
 
@@ -253,13 +255,8 @@ class HuurwoningenSpider(scrapy.Spider):
         raw_availability = labelled_features.get("Available", "")
         availability = normalize_availability(raw_availability)
         upkeep = labelled_features.get("Upkeep", "")
-        rental_period = labelled_features.get("Rental period", "")
 
         deposit = extract_number(labelled_features.get("Deposit", ""))
-        # Contract type, for example "Unlimited period".
-        contract_type = labelled_features.get("Contract type", "")
-
-        price_per_m2 = extract_number(labelled_features.get("Price per m²", ""))
 
         tags = []
 
@@ -326,6 +323,7 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["construction_year"] = construction_year
         listing["bathrooms"] = bathrooms
         listing["floors"] = floors
+        listing["floor"] = floor
         listing["housemates"] = housemates
         listing["gender_of_housemates"] = gender_of_housemates
         listing["kitchen"] = kitchen
@@ -342,10 +340,7 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["offered_since"] = offered_since
         listing["availability"] = availability
         listing["upkeep"] = upkeep
-        listing["rental_period"] = rental_period
-        listing["contract_type"] = contract_type
         listing["deposit"] = deposit
-        listing["price_per_m2"] = price_per_m2
         listing["smoking_allowed"] = smoking_allowed
         listing["pets_allowed"] = pets_allowed
         listing["target_audience"] = target_audience
