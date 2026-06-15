@@ -18,6 +18,27 @@ def extract_number(text):
     return int(digits_only)
 
 
+def pick_image_url(image_element):
+    # Huurwoningen lazy-loads its photos.
+    #  real photo URL is kept in the "data-src" attribute, while "src" only holds a gray "no photo yet"
+    # placeholder (a house icon) until the photo finishes loading.
+    url = image_element.css("::attr(data-src)").get()
+    if url is None or url.strip() == "":
+        url = image_element.css("::attr(src)").get()
+
+    if url is None:
+        return ""
+
+    url = url.strip()
+
+    # A lazy-load placeholder is an inline "data:" image, not a real link.
+    # Skip those so only real photos get saved.
+    if url.startswith("data:"):
+        return ""
+
+    return url
+
+
 def clean_text(parts):
     # Join a list of text pieces into one clean string
     pieces = []
@@ -82,11 +103,13 @@ class HuurwoningenSpider(scrapy.Spider):
 
             # Link to the detail page and the first image on the card
             href = card.css(".listing-search-item__link--title::attr(href)").get()
-            image = card.css(".picture__image::attr(src)").get()
 
             images = []
-            if image:
-                images.append(image)
+            card_image = card.css(".picture__image")
+            if card_image:
+                image_url = pick_image_url(card_image)
+                if image_url != "":
+                    images.append(image_url)
 
             # Only follow the listing if theres a link
             if href:
@@ -130,9 +153,19 @@ class HuurwoningenSpider(scrapy.Spider):
 
         # Collect all the images
         card_images = kwargs.pop("images", [])
-        detail_images = response.css(".carrousel__item .picture__image::attr(src)").getall()
 
-        similar_images = response.css(".picture--comparable-listing .picture__image::attr(src)").getall()
+        detail_images = []
+        for element in response.css(".carrousel__item .picture__image"):
+            image_url = pick_image_url(element)
+            if image_url != "":
+                detail_images.append(image_url)
+
+        # The "Similar properties" photos, so we can leave them out below
+        similar_images = []
+        for element in response.css(".picture--comparable-listing .picture__image"):
+            image_url = pick_image_url(element)
+            if image_url != "":
+                similar_images.append(image_url)
 
         images = []
         for image in card_images:
