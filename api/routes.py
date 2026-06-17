@@ -152,6 +152,7 @@ CHRONO_RESPONSE_FIELDS = (
     "room_type",
     "furnishing",
     "pet_friendly",
+    "enabled",
     "updated_at",
 )
 
@@ -277,6 +278,17 @@ def _chrono_task_payload():
     if error:
         return None, error
     task["pet_friendly"] = pet_friendly
+
+    # "enabled" says whether the user wants instant alerts for this task.
+    # When the frontend does not send it, default to on so older clients keep working as before.
+    enabled_value = payload.get("enabled")
+    if enabled_value is None or enabled_value == "":
+        task["enabled"] = True
+    else:
+        enabled, error = _optional_bool(payload, "enabled")
+        if error:
+            return None, error
+        task["enabled"] = enabled
 
     now = datetime.now(timezone.utc)
     task["created_at"] = now
