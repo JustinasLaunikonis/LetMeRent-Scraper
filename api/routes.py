@@ -694,6 +694,32 @@ def get_data():
         value = pet_friendly.lower() in ("true", "1", "yes")
         add_and_condition({"pet_friendly": value})
 
+    # DISTANCE FROM CAMPUS FILTER
+    # ?campus_lat=53.20&campus_lng=5.81&max_distance_km=3
+    # Only return listings within that many kilometers of the campus point.
+    campus_lat = request.args.get("campus_lat", type=float)
+    campus_lng = request.args.get("campus_lng", type=float)
+    max_distance_km = request.args.get("max_distance_km", type=float)
+    if campus_lat is not None and campus_lng is not None and max_distance_km is not None:
+        if max_distance_km > 0:
+            # $centerSphere needs the radius as an angle in radians, so we divide
+            # the distance in kilometers by the Earth's radius in kilometers.
+            earth_radius_km = 6378.1
+            radius_in_radians = max_distance_km / earth_radius_km
+
+            # GeoJSON uses [longitude, latitude] order (not latitude first).
+            distance_match = {
+                "location": {
+                    "$geoWithin": {
+                        "$centerSphere": [
+                            [campus_lng, campus_lat],
+                            radius_in_radians,
+                        ]
+                    }
+                }
+            }
+            add_and_condition(distance_match)
+
     # SORTING
     # ?sort=price&order=asc   -> cheapest first
     # ?sort=price&order=desc  -> most expensive first
