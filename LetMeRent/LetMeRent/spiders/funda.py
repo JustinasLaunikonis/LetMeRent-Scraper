@@ -194,8 +194,7 @@ class FundaSpider(scrapy.Spider):
         if not postal_city:
             postal_city = response.css("h1[data-global-id] .text-neutral-40::text").get("").strip()
 
-        # Remove the postal code from the front so only the city name is left.
-        city = re.sub(r"^\d{4}\s?[A-Z]{2}\s*", "", postal_city).strip()
+        city = re.sub(r"^\d{4}\s*([A-Z]{2})?\s*", "", postal_city).strip()
         if city == "":
             city = None
 
