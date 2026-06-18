@@ -27,6 +27,24 @@ DEPRECATED_FIELDS = (
 )
 
 
+def build_location_point(latitude, longitude):
+    # MongoDB geo searches ("within X km of a point") need the coordinates as a GeoJSON point.
+    if latitude is None or longitude is None:
+        return None
+
+    try:
+        lat_number = float(latitude)
+        lng_number = float(longitude)
+    except (TypeError, ValueError):
+        return None
+
+    point = {
+        "type": "Point",
+        "coordinates": [lng_number, lat_number],
+    }
+    return point
+
+
 class NormalizePipeline:
     # This pipeline runs for every scraped item, before it is stored.
     # It makes sure shared fields are always saved in the universal format,
@@ -84,6 +102,7 @@ class MongoDBPipeline:
         self.collection.create_index([("price", ASCENDING)], background=True)
         self.collection.create_index([("source", ASCENDING), ("price", ASCENDING)], background=True)
         self.collection.create_index([("city", ASCENDING), ("price", ASCENDING)], background=True)
+        self.collection.create_index([("location", "2dsphere")], background=True)
 
         spider.logger.info(
             "MongoDB pipeline connected to %s.%s",
@@ -101,6 +120,13 @@ class MongoDBPipeline:
 
         document.setdefault("source", spider.name)
         document["scraped_at"] = now
+
+        # Build a GeoJSON point from the latitude/longitude so the API can do "within X km of a campus" searches
+        latitude = document.get("latitude")
+        longitude = document.get("longitude")
+        location_point = build_location_point(latitude, longitude)
+        if location_point is not None:
+            document["location"] = location_point
 
         try:
             unique_value = document.get(self.unique_key) if self.unique_key else None
