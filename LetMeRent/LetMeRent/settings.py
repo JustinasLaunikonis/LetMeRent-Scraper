@@ -81,6 +81,9 @@ DOWNLOADER_MIDDLEWARES = {
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
+    # Runs first: cleans shared fields (like the move-in date) for every item.
+    "LetMeRent.pipelines.NormalizePipeline": 100,
+    # Runs after: stores the cleaned item in MongoDB.
     "LetMeRent.pipelines.MongoDBPipeline": 300,
 }
 

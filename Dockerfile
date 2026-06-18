@@ -9,6 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY backfill_location.py .
 COPY api ./api
 COPY LetMeRent ./LetMeRent
 COPY scripts ./scripts

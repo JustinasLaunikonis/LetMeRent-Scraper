@@ -52,6 +52,10 @@ class ListingRepository:
             collation=NUMERIC_STRING_COLLATION,
             background=True,
         )
+        # Geospatial index for the "max distance from campus" filter.
+        # It lets MongoDB quickly find listings within a circle around a campus point.
+        # It works on the GeoJSON "location" field (see the scraper pipeline).
+        collection.create_index([("location", "2dsphere")], background=True)
 
     def all(self):
         return list(self.collection.find({}))

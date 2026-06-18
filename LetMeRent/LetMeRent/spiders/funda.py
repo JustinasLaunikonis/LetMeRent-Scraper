@@ -62,6 +62,10 @@ class FundaSpider(scrapy.Spider):
         for address_link in listings:
             href = address_link.attrib.get("href", "")
             if href:
+                # Skip "koophuur" listings (buy-and-rent). We only want normal
+                # rentals, so we do not follow any link that has /koophuur/ in it.
+                if "/koophuur/" in href:
+                    continue
                 # Open the listing page to read its details.
                 yield response.follow(href, callback=self.parse_detail)
 
@@ -152,6 +156,9 @@ class FundaSpider(scrapy.Spider):
         return {}
 
     def parse_detail(self, response):
+        if "/koophuur/" in response.url:
+            return
+
         listing = self._nuxt_listing(response)
 
         price_obj = listing.get("price") or {}
@@ -187,8 +194,7 @@ class FundaSpider(scrapy.Spider):
         if not postal_city:
             postal_city = response.css("h1[data-global-id] .text-neutral-40::text").get("").strip()
 
-        # Remove the postal code from the front so only the city name is left.
-        city = re.sub(r"^\d{4}\s?[A-Z]{2}\s*", "", postal_city).strip()
+        city = re.sub(r"^\d{4}\s*([A-Z]{2})?\s*", "", postal_city).strip()
         if city == "":
             city = None
 

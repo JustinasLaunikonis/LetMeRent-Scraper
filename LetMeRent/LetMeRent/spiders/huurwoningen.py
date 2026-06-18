@@ -1,7 +1,7 @@
 import re
 import scrapy
 
-from LetMeRent.spiders.city_utils import city_slug, city_title, normalize_status, normalize_availability
+from LetMeRent.spiders.city_utils import city_slug, city_title, normalize_status, normalize_availability, postal_code_coordinates
 
 
 def extract_number(text):
@@ -16,6 +16,27 @@ def extract_number(text):
         return None
 
     return int(digits_only)
+
+
+def pick_image_url(image_element):
+    # Huurwoningen lazy-loads its photos.
+    #  real photo URL is kept in the "data-src" attribute, while "src" only holds a gray "no photo yet"
+    # placeholder (a house icon) until the photo finishes loading.
+    url = image_element.css("::attr(data-src)").get()
+    if url is None or url.strip() == "":
+        url = image_element.css("::attr(src)").get()
+
+    if url is None:
+        return ""
+
+    url = url.strip()
+
+    # A lazy-load placeholder is an inline "data:" image, not a real link.
+    # Skip those so only real photos get saved.
+    if url.startswith("data:"):
+        return ""
+
+    return url
 
 
 def clean_text(parts):
@@ -82,11 +103,13 @@ class HuurwoningenSpider(scrapy.Spider):
 
             # Link to the detail page and the first image on the card
             href = card.css(".listing-search-item__link--title::attr(href)").get()
-            image = card.css(".picture__image::attr(src)").get()
 
             images = []
-            if image:
-                images.append(image)
+            card_image = card.css(".picture__image")
+            if card_image:
+                image_url = pick_image_url(card_image)
+                if image_url != "":
+                    images.append(image_url)
 
             # Only follow the listing if theres a link
             if href:
@@ -118,6 +141,11 @@ class HuurwoningenSpider(scrapy.Spider):
             price = extract_number(raw_price)
             kwargs["price"] = price
 
+        rooms = kwargs.get("rooms")
+        if rooms is None:
+            rooms = extract_number(feature_value(response, "number_of_rooms"))
+            kwargs["rooms"] = rooms
+
         # description text is built by stripping each piece and dropping the
         # empty ones, then joining what is left with single spaces.
         description_parts = response.css(".listing-detail-description__truncated::text").getall()
@@ -130,15 +158,41 @@ class HuurwoningenSpider(scrapy.Spider):
 
         # Collect all the images
         card_images = kwargs.pop("images", [])
-        detail_images = response.css(".carrousel__item .picture__image::attr(src)").getall()
+
+        detail_images = []
+        for element in response.css(".carrousel__item .picture__image"):
+            image_url = pick_image_url(element)
+            if image_url != "":
+                detail_images.append(image_url)
+
+        # The "Similar properties" photos, so we can leave them out below
+        similar_images = []
+        for element in response.css(".picture--comparable-listing .picture__image"):
+            image_url = pick_image_url(element)
+            if image_url != "":
+                similar_images.append(image_url)
 
         images = []
         for image in card_images:
             if image not in images:
                 images.append(image)
         for image in detail_images:
+            # Skip any image that belongs to the "Similar properties" section
+            if image in similar_images:
+                continue
             if image not in images:
                 images.append(image)
+
+        # Postal code, for example "7815 KT (Emmermeer)".
+        # We only want the postal code, so we cut everything from the first "(" onwards.
+        raw_location = response.css(".listing-detail-summary__location::text").get("")
+        raw_location = raw_location.strip()
+        postal_code = raw_location.split("(")[0]
+        postal_code = postal_code.strip()
+
+        # Turn the postal code into map coordinates so this listing can get a pin
+        # on the map, the same way funda listings do with their latitude/longitude.
+        latitude, longitude = postal_code_coordinates(postal_code)
 
         # Furnishing / interior condition (may be empty on some listings)
         interior = response.css("[aria-describedby='tooltip-listing-features-interior']::text").get("")
@@ -154,11 +208,30 @@ class HuurwoningenSpider(scrapy.Spider):
         construction_type = feature_value(response, "construction_type")
         balcony = feature_value(response, "balcony")
         roof_terrace = feature_value(response, "roof_terrace")
+        situation = feature_value(response, "situations")
+        garden = feature_value(response, "garden")
+        storage = feature_value(response, "storage")
+        kitchen = feature_value(response, "kitchen")
+        bathroom = feature_value(response, "bathroom")
+        toilet = feature_value(response, "toilet")
+        gender_of_housemates = feature_value(response, "preferred_gender")
+        smoking_allowed = feature_value(response, "smoking_allowed")
+        pets_allowed = feature_value(response, "pets_allowed")
+        target_audience = feature_value(response, "required_statuses")
+
+        parking = response.css(".page__details--parking .listing-features__main-description::text").get("")
+        parking = parking.strip()
+        garage = response.css(".page__details--garage .listing-features__main-description::text").get("")
+        garage = garage.strip()
 
         # Numeric features
         construction_year = extract_number(feature_value(response, "construction_period"))
         bathrooms = extract_number(feature_value(response, "number_of_bathrooms"))
         floors = extract_number(feature_value(response, "number_of_floors"))
+        # This is the storey number, not how many floors the building has.
+        floor = extract_number(feature_value(response, "story_number"))
+        # Number of housemates, from the "Shared facilities" box on room listings.
+        housemates = extract_number(feature_value(response, "number_of_roommates"))
 
         # The "transfer" rows (Status, Available, etc.)
         feature_terms = response.css(".listing-features__term")
@@ -182,26 +255,66 @@ class HuurwoningenSpider(scrapy.Spider):
         raw_availability = labelled_features.get("Available", "")
         availability = normalize_availability(raw_availability)
         upkeep = labelled_features.get("Upkeep", "")
+        # Lease length, for example "Minimum of 1 months"
+        rental_period = labelled_features.get("Rental period", "")
+
+        deposit = extract_number(labelled_features.get("Deposit", ""))
 
         tags = []
 
         # Descriptive features that are useful as tags
-        descriptive = [property_type, property_types, interior, construction_type]
+        descriptive = [property_type, property_types, interior, construction_type, situation]
         for value in descriptive:
             if value != "" and value not in tags:
                 tags.append(value)
 
-        # Balcony and roof terrace only make sense as tags when present
+        # Outdoor space / parking only make sense as tags when actually present
         if balcony == "Present":
             tags.append("Balcony")
         if roof_terrace == "Present":
             tags.append("Roof terrace")
+        if garden == "Present":
+            tags.append("Garden")
+        if storage == "Present":
+            tags.append("Storage")
+        if parking == "Yes":
+            tags.append("Parking")
+        if garage == "Yes":
+            tags.append("Garage")
+
+        # Rental conditions that renters care about
+        if pets_allowed == "Yes":
+            tags.append("Pets allowed")
+        if smoking_allowed == "Yes":
+            tags.append("Smoking allowed")
+
+        # Target audience, for example "Working, Student"
+        if target_audience != "" and target_audience not in tags:
+            tags.append(target_audience)
+
+        # Some listings show an "Advance payment utilities" section in the price box,
+        # with a row for each utility (Water, Electricity, Gas). 
+        # add up all the amounts into one number so it can show as a "utilities" tag
+        utility_prices = response.css(".price-specification__group--utilities .price-specification__description::text").getall()
+        utilities = 0
+        for utility_price in utility_prices:
+            amount = extract_number(utility_price)
+            if amount is not None:
+                utilities = utilities + amount
+
+        # When there were no utility rows, leave it empty instead of 0
+        # so listings without this section do not show a "€0 utilities" tag.
+        if utilities == 0:
+            utilities = ""
 
         listing = {}
         for key in kwargs:
             listing[key] = kwargs[key]
 
         listing["city"] = self.city_name
+        listing["postal_code"] = postal_code
+        listing["latitude"] = latitude
+        listing["longitude"] = longitude
         listing["interior"] = interior
         listing["description"] = description
         listing["images"] = images
@@ -212,12 +325,29 @@ class HuurwoningenSpider(scrapy.Spider):
         listing["construction_year"] = construction_year
         listing["bathrooms"] = bathrooms
         listing["floors"] = floors
+        listing["floor"] = floor
+        listing["housemates"] = housemates
+        listing["gender_of_housemates"] = gender_of_housemates
+        listing["kitchen"] = kitchen
+        listing["bathroom"] = bathroom
+        listing["toilet"] = toilet
+        listing["situation"] = situation
         listing["balcony"] = balcony
         listing["roof_terrace"] = roof_terrace
+        listing["garden"] = garden
+        listing["storage"] = storage
+        listing["parking"] = parking
+        listing["garage"] = garage
         listing["status"] = status
         listing["offered_since"] = offered_since
         listing["availability"] = availability
         listing["upkeep"] = upkeep
+        listing["rental_period"] = rental_period
+        listing["deposit"] = deposit
+        listing["smoking_allowed"] = smoking_allowed
+        listing["pets_allowed"] = pets_allowed
+        listing["target_audience"] = target_audience
+        listing["utilities"] = utilities
         listing["tags"] = tags
 
         yield listing

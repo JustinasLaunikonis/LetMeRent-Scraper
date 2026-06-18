@@ -1,9 +1,83 @@
 import re
 import datetime
+import requests
 
 
 DEFAULT_CITY = "Emmen"
 DEFAULT_COUNTRY = "Netherlands"
+
+
+def pdok_coordinates(query, place_type):
+    # Look up the latitude and longitude for a place using PDOK
+    # (free Dutch government location service + no API key needed).
+    # Some sources only give us a postal code or an address instead of coordinates, but the map needs
+    # latitude and longitude to place a pin, so we can find it with PDOK
+    
+    # "query" is the text to search for, for example a postal code like
+    # "7815 KT", or a full address like "Hoofdstraat 12, Emmen".
+    # "place_type" tells PDOK what kind of result we need: "postcode" or "adress".
+
+    # Returns (latitude, longitude), or (None, None) when nothing is found. When
+    # it returns (None, None) the listing simply has no map pin (it still shows
+    # in the sidebar), the same as a funda listing with missing coordinates.
+    if query is None or query == "":
+        return None, None
+
+    url = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
+    # fq=type:... keeps only the kind of match we asked for.
+    # fl=centroide_ll asks PDOK to return just the centre point of that place.
+    params = {
+        "q": query,
+        "fq": "type:" + place_type,
+        "fl": "centroide_ll",
+        "rows": 1,
+    }
+
+    # The network call can fail (no internet, PDOK down)
+    # "no coordinates found" instead of crashing the whole spider
+    try:
+        response = requests.get(url, params=params, timeout=10)
+    except Exception:
+        return None, None
+
+    if response.status_code != 200:
+        return None, None
+
+    data = response.json()
+
+    response_part = data.get("response", {})
+    docs = response_part.get("docs", [])
+    if len(docs) == 0:
+        return None, None
+
+    # PDOK gives the point as text like "POINT(6.9054 52.7794)", which is "POINT(longitude latitude)".
+    # strip the "POINT(" and ")" and split on the space to get the two numbers.
+    point = docs[0].get("centroide_ll", "")
+    point = point.replace("POINT(", "")
+    point = point.replace(")", "")
+    parts = point.split(" ")
+    if len(parts) != 2:
+        return None, None
+
+    longitude = float(parts[0])
+    latitude = float(parts[1])
+    return latitude, longitude
+
+
+def postal_code_coordinates(postal_code):
+    # Turn a Dutch postal code (like "7815 KT") into map coordinates.
+
+    # remove the space first ("7815 KT" -> "7815KT")
+    if postal_code is None:
+        return None, None
+
+    postal_code_no_spaces = postal_code.replace(" ", "")
+    return pdok_coordinates(postal_code_no_spaces, "postcode")
+
+
+def address_coordinates(address):
+    # Turn a full street address (like "Hoofdstraat 12, Emmen") into map coordinates.
+    return pdok_coordinates(address, "adres")
 
 
 # Month names (and the common short forms) mapped to their number.
@@ -109,6 +183,11 @@ def normalize_availability(text=None):
     if "immediat" in lowered or "now" in lowered or "direct" in lowered or "asap" in lowered:
         return "Immediately"
 
+    # "In consultation", "Available in consultation" (Funda) 
+    # Different sites word it differently, so store one standard phrase for all of them.
+    if "consultation" in lowered or "consult" in lowered or "overleg" in lowered:
+        return "In consultation"
+
     # Look for a 4-digit year anywhere in the text (it may be missing).
     year_match = re.search(r"(\d{4})", cleaned)
 
@@ -151,6 +230,10 @@ def normalize_availability(text=None):
         month = int(dash.group(2))
         year = int(dash.group(3))
         return build_date(year, month, day)
+
+    only_letters = re.sub(r"[^a-z]", "", lowered)
+    if only_letters == "available" or only_letters == "availablefrom":
+        return "Immediately"
 
     # Nothing matched a date, so keep the original text.
     return cleaned

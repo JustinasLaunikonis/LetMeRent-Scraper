@@ -1,7 +1,27 @@
 import scrapy
 import re
+from urllib.parse import quote
 
-from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability
+from LetMeRent.spiders.city_utils import city_title, normalize_status, normalize_availability, address_coordinates
+
+
+def full_size_image(url):
+    # iRentalize runs on WordPress
+    # In the photo gallery most images are shown as small thumbnails whose URL ends with a size like
+    # "-300x200" or "-768x512" right before the file extension, for example:
+    #   IMG_6989-1-300x200.jpg
+
+    # WordPress always keeps the original full-resolution file at the same URL
+    # but without that size part:
+    #   IMG_6989-1.jpg
+
+    # So remove the "-WIDTHxHEIGHT" piece to get the high quality image.
+    if url is None:
+        return None
+
+    # Remove a "-123x456" that comes right before a "." (the file extension).
+    big_url = re.sub(r"-\d+x\d+(?=\.)", "", url)
+    return big_url
 
 
 def extract_number(text):
@@ -21,18 +41,21 @@ def extract_number(text):
 class IRentalizeSpider(scrapy.Spider):
     name = "irentalize"
     allowed_domains = ["irentalize.nl"]
-    start_urls = ["https://irentalize.nl/properties/"]
+    base_url = "https://irentalize.nl/properties/"
 
     def __init__(self, city=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.city = city_title(city)
 
+    def build_start_url(self):
+        city = quote(self.city, safe="")
+        return f"{self.base_url}?jsf=jet-engine:filterproperty&meta=city:{city}"
+
     def start_requests(self):
-        # The site loads its listings with JavaScript, so we use Playwright to open a real browser page.
-        # We keep the page open (with "playwright_include_page") so we can click the city filter and the
-        # pagination buttons in parse_city.
+        # The site loads its listings with JavaScript, use Playwright to open a real browser page
+        # keep the page open (with "playwright_include_page") so we can click the pagination buttons in parse_city.
         yield scrapy.Request(
-            url=self.start_urls[0],
+            url=self.build_start_url(),
             meta={
                 "playwright": True,
                 "playwright_include_page": True,
@@ -63,18 +86,6 @@ class IRentalizeSpider(scrapy.Spider):
             except Exception:
                 pass
 
-            # Pick our city in the filter dropdown and tell the page it changed
-            city_select = page.locator("select.jet-select__control[name='city']")
-            await city_select.wait_for(timeout=10000)
-            await city_select.select_option(value=city)
-            await city_select.dispatch_event("change")
-
-            await page.wait_for_timeout(2000)
-
-            # Press the "apply filters" button so the list reloads for our city
-            await page.locator("button.apply-filters__button").click()
-            await page.wait_for_timeout(5000)
-
             # Go through the result pages one by one until there are no more
             while True:
                 self.logger.info(f"SCRAPING CITY {city} PAGE {page_number}")
@@ -83,9 +94,10 @@ class IRentalizeSpider(scrapy.Spider):
                 html = await page.content()
                 selector = scrapy.Selector(text=html)
 
-                property_links = selector.css(
-                    "a[href*='/properties/']::attr(href), "
-                    "a[href*='/property/']::attr(href)"
+                property_links = selector.xpath(
+                    "//a[contains(@href, '/properties/') or contains(@href, '/property/')]"
+                    "[not(ancestor::*[contains(@class, 'swiper')])]"
+                    "/@href"
                 ).getall()
 
                 for href in property_links:
@@ -195,16 +207,45 @@ class IRentalizeSpider(scrapy.Spider):
                 text_pieces.append(piece)
         all_text = " ".join(text_pieces)
 
-        raw_images = response.css(
-            "img::attr(src), "
-            ".e-gallery-image::attr(data-thumbnail)"
+        gallery_images = response.xpath(
+            "//img"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@src"
         ).getall()
 
-        # Remove duplicate images but keep their original order
+        # iRentalize lazy-loads its photos
+        # Before a photo is loaded, the site shows a blank placeholder whose "src" is an invisible SVG that starts with "data:image/svg+xml".
+        lazy_images = response.xpath(
+            "//img"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@data-lazy-src"
+        ).getall()
+
+        thumbnail_images = response.xpath(
+            "//*[contains(@class, 'e-gallery-image')]"
+            "[not(ancestor::*[contains(@class, 'jet-listing-grid')])]"
+            "[not(ancestor::*[contains(@class, 'jet-carousel')])]"
+            "[not(ancestor::*[contains(@class, 'elementor-author-box')])]"
+            "/@data-thumbnail"
+        ).getall()
+
+        raw_images = gallery_images + lazy_images + thumbnail_images
+
         images = []
         for image in raw_images:
-            if image not in images:
-                images.append(image)
+            # Skip the blank lazy-load placeholders
+            if image is None:
+                continue
+            if image.startswith("data:"):
+                continue
+
+            big_image = full_size_image(image)
+            if big_image not in images:
+                images.append(big_image)
 
         # Remove the first image because it is usually the iRentalize logo
         if images:
@@ -229,9 +270,9 @@ class IRentalizeSpider(scrapy.Spider):
         if rooms is None:
             rooms = self.extract_rooms(all_text)
 
-        price = starting_price
+        price = base_rent
         if price is None:
-            price = base_rent
+            price = starting_price
 
         if title:
             title = title.strip()
@@ -243,19 +284,49 @@ class IRentalizeSpider(scrapy.Spider):
         else:
             landlord = None
 
+        # The title heading holds the street address (street + house number).
+        # iRentalize does not give coordinates, so build a full address from
+        # the title and the city and ask PDOK to turn it into latitude/longitude.
+        city = self.extract_city(headings, all_text)
+
+        # only keep this listing if its city matches the city we searched for
+        # The Featured section at the bottom sometimes shows listings from other cities,
+        # so if we know both cities and they are different, skip it
+        city_filter = response.meta.get("city_filter")
+        if city is not None and city_filter is not None:
+            if city.strip().lower() != city_filter.strip().lower():
+                self.logger.info(
+                    f"SKIPPING {response.url} - city '{city}' does not match filter '{city_filter}'"
+                )
+                return
+
+        full_address = ""
+        if title:
+            full_address = title
+            if city:
+                full_address = full_address + ", " + city
+
+        latitude, longitude = address_coordinates(full_address)
+
         yield {
             "city_filter": response.meta.get("city_filter"),
             "listing_page": response.meta.get("listing_page"),
             "url": response.url,
             "title": title,
             "property_type": self.extract_property_type(headings),
-            "city": self.extract_city(headings, all_text),
+            "city": city,
+            "latitude": latitude,
+            "longitude": longitude,
 
             # Number only, without m²
             "living_area": self.extract_size(all_text),
 
             # Number only, without "room" or "rooms"
             "rooms": rooms,
+
+            # iRentalize lists shared student houses, so assume that number of rooms is also the number of housemates
+            # -1 because the person renting the room is not their own housemate
+            "housemates": rooms - 1,
             "bathrooms": feature_info["bathrooms"],
             "kitchens": feature_info["kitchens"],
             "toilets": feature_info["toilets"],

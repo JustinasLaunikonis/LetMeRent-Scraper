@@ -1,5 +1,6 @@
 import scrapy
 import re
+import json
 from urllib.parse import urlparse, parse_qs, unquote
 
 from LetMeRent.spiders.city_utils import city_slug, normalize_availability
@@ -28,6 +29,74 @@ def full_size_image(image_url):
     return image_url
 
 
+def detail_page_images(response):
+    # The detail page loads its photo gallery with JavaScript, so the HTML we
+    # download only contains a low-quality thumbnail. Luckily Kamernet is a
+    # Next.js site, which means the full data is also written into a JSON blob
+    # inside a <script id="__NEXT_DATA__"> tag. That JSON has a list of photo
+    # ids ("imageList"), and each id maps to a full-quality photo at
+    # https://resources.kamernet.nl/image/<id>.
+    # This function reads that list and returns the full-quality photo URLs.
+    # Returns an empty list when the data is missing or cannot be read.
+    raw_json = response.css("script#__NEXT_DATA__::text").get()
+    if not raw_json:
+        return []
+
+    # Turn the text into a Python object. If it is broken, give up safely.
+    try:
+        data = json.loads(raw_json)
+    except ValueError:
+        return []
+
+    # Walk down the JSON step by step. At each step, stop if the key is missing.
+    page_props = data.get("props", {}).get("pageProps", {})
+    target = page_props.get("targetPageProps", {})
+    listing_details = target.get("listingDetails", {})
+    image_ids = listing_details.get("imageList", [])
+
+    # Build the full-quality URL for every photo id we found.
+    image_urls = []
+    for image_id in image_ids:
+        if image_id:
+            image_urls.append("https://resources.kamernet.nl/image/" + image_id)
+
+    return image_urls
+
+
+def to_number(value):
+    # Turn a coordinate like 52.78352 (or the text "52.78352") into a float.
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def detail_page_coordinates(response):
+    # Kamernet draws a map on the detail page, and the location for it is written
+    # into the same __NEXT_DATA__ JSON blob we already read for the photos
+
+    raw_json = response.css("script#__NEXT_DATA__::text").get()
+    if not raw_json:
+        return None, None
+
+    try:
+        data = json.loads(raw_json)
+    except ValueError:
+        return None, None
+
+    page_props = data.get("props", {}).get("pageProps", {})
+    target = page_props.get("targetPageProps", {})
+    listing_details = target.get("listingDetails", {})
+
+    latitude = to_number(listing_details.get("postalCodeLat"))
+    longitude = to_number(listing_details.get("postalCodeLong"))
+
+    return latitude, longitude
+
+
 def extract_number(text):
     # Keep only the digits from the text, so "€ 375" becomes 375
     # Returns None when there is no number at all
@@ -40,6 +109,14 @@ def extract_number(text):
         return None
 
     return int(digits_only)
+
+
+def remove_word(text, word):
+    cleaned = text.replace(word, "")
+    cleaned = cleaned.replace(word.capitalize(), "")
+    # Turn any double spaces left behind into single spaces.
+    cleaned = " ".join(cleaned.split())
+    return cleaned.strip()
 
 
 class KamernetSpider(scrapy.Spider):
@@ -89,7 +166,9 @@ class KamernetSpider(scrapy.Spider):
 
             furnished = ""
             if len(details) > 1:
-                furnished = details[1].strip()
+                # Values like "furnished"/"unfurnished" come through lower-case,
+                # so capitalise them ("unfurnished" -> "Unfurnished").
+                furnished = details[1].strip().capitalize()
 
             property_type = ""
             if len(details) > 2:
@@ -173,32 +252,87 @@ class KamernetSpider(scrapy.Spider):
         amenities = response.css("section.Details_root__6__Gy .Details_gridItem__ids4p p.MuiTypography-body1::text").getall()
 
         energy_label = ""
+        housemates = None
+        gender_of_housemates = ""
+        kitchen = ""
+        bathroom = ""
+        toilet = ""
+        pets_allowed = ""
+        smoking_allowed = ""
+
+        leftover_amenities = []
+
         for amenity in amenities:
             text = amenity.strip()
+            if text == "":
+                continue
+
+            lower = text.lower()
+
             if text.startswith("Energy label"):
+                # "Energy label C" -> keep just the grade "C"
                 energy_label = text[len("Energy label"):].strip()
 
-        # Rental costs: deposit and any extra monthly costs
+            elif "roommate" in lower:
+                # "6 roommates" tells us the number of housemates.
+                # "Mixed gender roommates" tells us the gender mix instead.
+                number = extract_number(text)
+                if number is not None:
+                    housemates = number
+                else:
+                    # Keep just the first word, for example "Mixed" or "Female".
+                    words = text.split()
+                    if len(words) > 0:
+                        gender_of_housemates = words[0]
+
+            elif "kitchen" in lower:
+                # "Shared kitchen" -> store just "Shared"
+                kitchen = remove_word(text, "kitchen")
+
+            elif "bathroom" in lower:
+                bathroom = remove_word(text, "bathroom")
+
+            elif "toilet" in lower:
+                toilet = remove_word(text, "toilet")
+
+            elif "pets" in lower:
+                if lower.startswith("no"):
+                    pets_allowed = "No"
+                else:
+                    pets_allowed = "Yes"
+
+            elif "smoking" in lower:
+                if lower.startswith("no"):
+                    smoking_allowed = "No"
+                else:
+                    smoking_allowed = "Yes"
+
+            else:
+                leftover_amenities.append(text)
+
+        # Rental costs: deposit and the extra monthly costs
         cost_rows = response.css("section.RentalCosts_root__mUggN .RentalCosts_cardRow__RilZB")
         deposit_raw = ""
-        additional_costs_raw = ""
+        utilities_raw = ""
         for row in cost_rows:
             label = row.css("p::text").get("").strip()
             value = row.css("h6::text").get("").strip()
             if "Deposit" in label:
                 deposit_raw = value
             elif "Additional" in label:
-                additional_costs_raw = value
+                # Kamernet labels this row "Additional costs" and shows something
+                # like "€15 extra", but this amount is basically the monthly
+                # utilities price, so keep it as the utilities amount.
+                utilities_raw = value
 
         # These are money amounts, store them as plain numbers (None if missing)
         deposit = extract_number(deposit_raw)
-        additional_costs = extract_number(additional_costs_raw)
+        utilities_price = extract_number(utilities_raw)
 
-        # Whether utilities are included is shown in the price label, for example "/month incl. utilities".
-        # turn that into a short tag.
-        # The label only mentions utilities when they are included, so if it is not mentioned treat utilities as not included.
         price_label = kwargs.get("price_label", "")
-        if "incl. utilities" in price_label.lower():
+        if utilities_price is not None:
+            utilities = utilities_price
+        elif "incl. utilities" in price_label.lower():
             utilities = "Incl. utilities"
         else:
             utilities = "Excl. utilities"
@@ -213,14 +347,13 @@ class KamernetSpider(scrapy.Spider):
                 rental_period = note
 
         tags = []
-        for amenity in amenities:
-            amenity = amenity.strip()
+        for amenity in leftover_amenities:
             if amenity != "" and amenity not in tags:
                 tags.append(amenity)
 
         furnished = kwargs.get("furnished", "")
         property_type = kwargs.get("property_type", "")
-        extra_tags = [utilities, furnished, property_type, rental_period]
+        extra_tags = [furnished, property_type, rental_period]
         for extra in extra_tags:
             extra = extra.strip()
             if extra != "" and extra not in tags:
@@ -230,6 +363,7 @@ class KamernetSpider(scrapy.Spider):
         # keep the value only, and turn "Number of tenants: 2" into {"Number of tenants": 2}
         tenant_rows = response.css("section.IdealTenant_root__TS7M8 .IdealTenant_row__U4412")
         ideal_tenant = {}
+        duration_of_stay = ""
         for row in tenant_rows:
             texts = row.css("p::text").getall()
             if len(texts) == 2:
@@ -243,6 +377,13 @@ class KamernetSpider(scrapy.Spider):
                     # Drop the word "years", keep just the range.
                     val = re.sub(r"\s*years$", "", val)
                     val = val.strip()
+                elif key == "Duration of stay":
+                    duration_of_stay = val
+
+                if isinstance(val, str) and "," in val:
+                    parts = [part.strip() for part in val.split(",") if part.strip()]
+                    val = ", ".join(parts[:3])
+
                 ideal_tenant[key] = val
 
         landlord_name = response.css("section.LandlordInfo_root__1KSuS h6.MuiTypography-subtitle1::text").get("").strip()
@@ -254,6 +395,17 @@ class KamernetSpider(scrapy.Spider):
         for key in kwargs:
             listing[key] = kwargs[key]
 
+        # The card only gave us one low-quality thumbnail. The detail page has
+        # the full set of high-quality photos, so use those when we can find
+        # them. If we cannot, keep the card image we already have.
+        detail_images = detail_page_images(response)
+        if detail_images:
+            listing["images"] = detail_images
+
+        latitude, longitude = detail_page_coordinates(response)
+        listing["latitude"] = latitude
+        listing["longitude"] = longitude
+
         # Kamernet only shows rooms that are for rent, so the status is always
         # "Available". availability (in kwargs) holds the move-in date.
         listing["status"] = "Available"
@@ -261,10 +413,17 @@ class KamernetSpider(scrapy.Spider):
         listing["amenities"] = amenities
         listing["tags"] = tags
         listing["energy_label"] = energy_label
+        listing["housemates"] = housemates
+        listing["gender_of_housemates"] = gender_of_housemates
+        listing["kitchen"] = kitchen
+        listing["bathroom"] = bathroom
+        listing["toilet"] = toilet
+        listing["pets_allowed"] = pets_allowed
+        listing["smoking_allowed"] = smoking_allowed
         listing["utilities"] = utilities
         listing["deposit"] = deposit
-        listing["additional_costs"] = additional_costs
         listing["rental_period"] = rental_period
+        listing["duration_of_stay"] = duration_of_stay
         listing["ideal_tenant"] = ideal_tenant
         listing["landlord_name"] = landlord_name
         listing["landlord_type"] = landlord_type

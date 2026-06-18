@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+import re
 
 from flask import Blueprint, g, jsonify, request
 from pymongo import ASCENDING, DESCENDING
@@ -151,6 +152,7 @@ CHRONO_RESPONSE_FIELDS = (
     "room_type",
     "furnishing",
     "pet_friendly",
+    "enabled",
     "updated_at",
 )
 
@@ -276,6 +278,17 @@ def _chrono_task_payload():
     if error:
         return None, error
     task["pet_friendly"] = pet_friendly
+
+    # "enabled" says whether the user wants instant alerts for this task.
+    # When the frontend does not send it, default to on so older clients keep working as before.
+    enabled_value = payload.get("enabled")
+    if enabled_value is None or enabled_value == "":
+        task["enabled"] = True
+    else:
+        enabled, error = _optional_bool(payload, "enabled")
+        if error:
+            return None, error
+        task["enabled"] = enabled
 
     now = datetime.now(timezone.utc)
     task["created_at"] = now
@@ -444,6 +457,12 @@ def get_data():
 
         mongo_filter["$and"].append(condition)
 
+    # ALWAYS HIDE LISTINGS WITHOUT A PRICE
+    has_price = {
+        "price": {"$exists": True, "$nin": [None, "", 0, "0"]}
+    }
+    add_and_condition(has_price)
+
     # CITY FILTER
     # If the URL is ?city=something, only return listings in that city.
     city = request.args.get("city")
@@ -544,6 +563,19 @@ def get_data():
             if key not in has_field_map:
                 continue
 
+            if key == "furnished":
+                # Only count listings that are actually "Furnished"
+                furnished_match = {
+                    "furnished": {"$regex": "^furnished$", "$options": "i"}
+                }
+                interior_match = {
+                    "interior": {"$regex": "^furnished$", "$options": "i"}
+                }
+                has_conditions.append({
+                    "$or": [furnished_match, interior_match]
+                })
+                continue
+
             fields = has_field_map[key]
             if len(fields) == 1:
                 # Only one field to check for this tag.
@@ -562,6 +594,22 @@ def get_data():
             for condition in has_conditions:
                 add_and_condition(condition)
 
+    # GARAGE / PARKING FILTER
+    # Real listings always have a living area (square meters), but garages and parking spots do not.
+    # So "no living area" is a simple way to show only garages and parking spots.
+    # ?no_living_area=1 -> only listings that have no living_area value.
+    no_living_area = request.args.get("no_living_area")
+    if no_living_area == "1":
+        # A listing counts as "no living area" when the field is missing, or it
+        # is empty/null, or it is zero.
+        missing_area = {
+            "$or": [
+                {"living_area": {"$exists": False}},
+                {"living_area": {"$in": [None, "", 0, "0"]}},
+            ]
+        }
+        add_and_condition(missing_area)
+
     # ENERGY LABEL FILTER
     # ?energy_label=A  -> listings whose energy label is in that class.
     # Labels are stored inconsistently (A, A+, A+++, A3, ...), so we match on
@@ -576,6 +624,29 @@ def get_data():
                 "$regex": "^" + letter,
                 "$options": "i",
             }
+
+    # ?available_by=2026-09-01 -> only listings you can move into on or before that date.
+    available_by = request.args.get("available_by")
+    if available_by:
+        chosen_date = available_by.strip()
+        # Only accept a proper "YYYY-MM-DD" value so we never build a broken filter.
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", chosen_date):
+            available_now = {"availability": "Immediately"}
+            available_dated = {
+                "availability": {
+                    "$regex": r"^\d{4}-\d{2}-\d{2}$",
+                    "$lte": chosen_date,
+                }
+            }
+            move_in_match = {"$or": [available_now, available_dated]}
+
+            # Add this condition without overwriting any $and the filters above
+            # may have already set (for example the "has" tag filter).
+            if "$and" in mongo_filter:
+                mongo_filter["$and"].append(move_in_match)
+            else:
+                mongo_filter["$and"] = [move_in_match]
+
 
     created_after = request.args.get("created_after")
 
@@ -623,6 +694,32 @@ def get_data():
         value = pet_friendly.lower() in ("true", "1", "yes")
         add_and_condition({"pet_friendly": value})
 
+    # DISTANCE FROM CAMPUS FILTER
+    # ?campus_lat=53.20&campus_lng=5.81&max_distance_km=3
+    # Only return listings within that many kilometers of the campus point.
+    campus_lat = request.args.get("campus_lat", type=float)
+    campus_lng = request.args.get("campus_lng", type=float)
+    max_distance_km = request.args.get("max_distance_km", type=float)
+    if campus_lat is not None and campus_lng is not None and max_distance_km is not None:
+        if max_distance_km > 0:
+            # $centerSphere needs the radius as an angle in radians, so we divide
+            # the distance in kilometers by the Earth's radius in kilometers.
+            earth_radius_km = 6378.1
+            radius_in_radians = max_distance_km / earth_radius_km
+
+            # GeoJSON uses [longitude, latitude] order (not latitude first).
+            distance_match = {
+                "location": {
+                    "$geoWithin": {
+                        "$centerSphere": [
+                            [campus_lng, campus_lat],
+                            radius_in_radians,
+                        ]
+                    }
+                }
+            }
+            add_and_condition(distance_match)
+
     # SORTING
     # ?sort=price&order=asc   -> cheapest first
     # ?sort=price&order=desc  -> most expensive first
@@ -652,11 +749,9 @@ def get_data():
 
         sort = [(sort_field, direction)]
 
-        # Listings without a price are meaningless in a price-sorted view, and
-        # Mongo orders null below any number so they would clump at the very top
-        # on an ascending sort. Exclude them whenever we sort by price.
-        if sort_field == "price":
-            add_and_condition({"price": {"$ne": None}})
+        # Note: listings without a price are already excluded for every request
+        # (see the "ALWAYS HIDE LISTINGS WITHOUT A PRICE" filter near the top),
+        # so a price sort never has to worry about null prices clumping together.
 
     # PAGINATION
     # Instead of returning all 56mb's of listings at once, we return them in pages
